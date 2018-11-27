@@ -1,254 +1,341 @@
+---
+title: "Simplest CN-model"
+author: "Beni Stocker"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: paper
+    toc: true
+    toc_float: true
+    toc_depth: 2
+# output:
+#   pdf_document:
+#     toc: true
+#     toc_depth: 2
+header-includes:
+   - \usepackage{amsmath}
+# bibliography: bibliography.bib
+---
+
+\newcommand{\rcton}{r_{\text{C:N}}}
+\newcommand{\nacq}{N_{\text{acq}}}
+\newcommand{\netmin}{N_{\text{min}}}
+\newcommand{\nin}{N_{\text{in}}}
+
+
+One may assume that the general dynamics of the coupled C and N cycling in terrestrial ecosystems can be described by a small list of processes (functions). The simplest CN-model ("sCN-model") embodies the following relationships:
+
+- The plant (divided into an above and a belowground compartment) balances the acquisition of C and N in order to satisfy its stoichiometric requirements (fixed: $r_{C:N}$), imposed by new growth (*balanced growth condition*):
+$$
+\rcton = \frac{ y [ P - r(C_l+C_r) ] }{ \nacq } \; \; \; \; \; \; (1)
+$$
+$P$ is the C assimilation rate, $y$ is the growth efficiency, $r$ a respiration coefficient, implying that plant respiration scales with its size, $C_l$ and $C_r$ are the leaf carbon and root pool sizes respectively, and $N_{\text{acq}}$ is the the N acquisition flux. 
+
+- The size of the above-ground pool $C_l$ (each pool consists of C and N) determines the assimilation rate of C ($P$) and has declining marginal returns towards increasing $C_l$.
+$$
+P(C_l) = I \varepsilon \left(1 - e^{-k_b \sigma C_{\text{l}}} \right)
+$$
+
 ```{r}
 prod <- function( cleaf, ppfd, lue ){
   kbeer         = 0.5
   sla           = 0.1
-
   prod <- ppfd * lue * ( 1.0 - exp( - kbeer * sla * cleaf ) )
-
   return(prod)
 }
+## Example
+curve( prod( x, ppfd = 100, lue = 1 ), from = 0, to = 350, xlab = expression(italic(C[l])), ylab = expression(italic(P)) )
 ```
+
+
+- The size of the below-ground pool ($C_r$) determines the fraction of net N mineralisation $\netmin$ that is acquired by the plant of N ($\nacq$). As for $P$, the function $f(C_r)$ represents declining marginal returns in $\nacq$ with increasing $C_r$:
+$$
+\nacq = f(C_r) \netmin   \\
+f(Cr) = (1 - u)  (1 - e^{-k_r  C_r } ) 
+$$
+Here, $u$ is the unaccessible fraction of net mineralisation, i.e. N losses that are not subject to plant control.
 
 ```{r}
 f_noloss <- function( croot ){
   f_unavoidable = 0.1
   k_noloss      = 100
-
   # f_avl <- (1.0 - f_unavoidable) * croot / (croot + 100 )
   # f_avl <- min( 1.0, croot / 30 )
   out   <- (1.0 - f_unavoidable) * (1.0 - exp( - 0.01 * croot ) )
-  
   return(out)
 }
+## Example
+netmin <- 1.0
+curve( netmin * f_noloss(x), from = 0, to = 350, ylim=c(0,1), xlab = expression(italic(C[r])), ylab = expression(italic(N[acq])) )
+abline( h=(1-0.1), lty=3 )
+abline( h=netmin, lty=2 )
 ```
 
-```{r}
-eval_cnbalance <- function( f_ag, ctot, navl, lue, ppfd ){
+## Example
 
+For given $I$, $\varepsilon$, $N_{\text{min}}$, a balance of above-to-belowground pool size $a = C_l:C_r$ can be found that satisfies Eq. (1). The imbalance can be expressed as
+$$
+\frac{ y [ P(aC) - rC ] }{ f((1-a)C)\netmin } - r_{\text{C:N}} = 0
+$$
+Here, $C=C_l+C_r$ and $a=C_l/C$. Below is an example plot for the imbalance term as a function of $a$. 
+
+```{r}
+eval_cnbalance <- function( f_ag, ctot, netmin, lue, ppfd ){
   eff  = 0.7
   resp = 0.1
   r_cton_plant = 30
 
-  out <- (( eff  * ( prod( f_leaf_of_c_ag_tot( f_ag * ctot ) * f_ag * ctot, ppfd, lue ) - resp * ctot ) ) /
-         ( navl * f_noloss( (1.0 - f_ag) * ctot ) ) ) - r_cton_plant
+  ## version where not all aboveground C is leaves
+  # out <- (( eff  * ( prod( f_leaf_of_c_ag_tot( f_ag * ctot ) * f_ag * ctot, ppfd, lue ) - resp * ctot ) ) /
+  #        ( netmin * f_noloss( (1.0 - f_ag) * ctot ) ) ) - r_cton_plant
+
+  ## version where all aboveground C is leaves
+  out <- (( eff  * ( prod( f_ag * ctot, ppfd, lue ) - resp * ctot ) ) /
+         ( netmin * f_noloss( (1.0 - f_ag) * ctot ) ) ) - r_cton_plant
 
   return( out )
 }
-```
 
-```{r}
-c_wood <- function( ctot ){
-  par = 50
-  sqrt( ctot^2 + par ) - sqrt(par)
-}
-
-c_leaf <- function( ctot ){
-  kl = 0.3
-  c_leaf_max = 20
-  c_leaf_max * (1 - exp(-kl*ctot))
-}
-
-f_leaf_of_c_ag_tot <- function( c_ag_tot ){
-  ifelse( c_ag_tot==0, 1.0, c_leaf( c_ag_tot ) / (c_leaf( c_ag_tot ) + c_wood( c_ag_tot )) )
-}
-```
-
-## Static CN-model for one state-------------------------------
 lue  = 1
-ppfd = 100
-navl = 0.8
+ppfd = 60
+netmin = 0.8
 ctot = 350
 
-curve( c_wood(x), from = 0, to = 50 )
-curve( c_leaf(x), from = 0, to = 50, add = TRUE )
-curve( f_leaf_of_c_ag_tot(x), from = 0, to = ctot )
-
-curve( prod( f_leaf_of_c_ag_tot( x ) * x, ppfd, lue ), from = 0, to = ctot )
-curve( f_noloss, from = 0, to = ctot*2 )
-
-## Visualise imbalance curve
-par(mfrow=c(1,1))
-curve( eval_cnbalance( x, ctot, navl, lue, ppfd ), from = 0, to = 1.0, col="red", ylim=c(-20,100) )
+## Imbalance as a function of the C_l:C
+curve( eval_cnbalance( x, ctot, netmin, lue, ppfd ), from = 0, to = 1.0, col="red", ylim=c(-20,100), xlab=expression(italic(C[l]/C)), ylab=expression(Imbalance) )
 abline( h=0, lty=3 )
-out_root <- uniroot( function(x) eval_cnbalance( x, ctot, navl, lue, ppfd ), interval=c(0,1.0) )
+out_root <- uniroot( function(x) eval_cnbalance( x, ctot, netmin, lue, ppfd ), interval=c(0,1.0) )
 abline( v = out_root$root, lty = 2 )
+```
 
-## production curve
-curve( prod( f_leaf_of_c_ag_tot( x ) * x, ppfd, lue ), from = 0, to = ctot ) # x is total aboveground
-points( out_root$root * ctot, prod( f_leaf_of_c_ag_tot( out_root$root * ctot ) * out_root$root * ctot, ppfd, lue ), pch=16, col="red" )
+## Steady-state solution
 
-## N uptake curve
-curve( navl * f_noloss( x ), from = 0, to = ctot ) # x is total belowground
-points( (1.0 - out_root$root) * ctot, navl * f_noloss( (1.0 - out_root$root) * ctot ), pch=16, col="red" )
+In steady state, the total stock of N in the soil is constant. This implies that net mineralisation equals total N inputs through litterfall and N deposition (assuming deposited N bypasses plants). For the sake of simplicity, N fixation and resorption are ignored here.
+$$
+\netmin = \frac{C}{\rcton\tau} + \nin
+$$
+Here, $\tau$ is the residence time of C and N in the plant pool; $\nin$ is the external input of N, subsuming atmospheric deposition and weathering. Using this, the steady-state solution of the coupled soil-plant system can be found, without relying on prescribed net mineralisation rates, with the balanced-growth condition:
+$$
+\frac{ y [ P(aC) - rC ] }{ f((1-a)C)\frac{C}{\rcton\tau} +\nin } - r_{\text{C:N}} = 0 \; \; \; \;\; \; \; \;(2)
+$$
+and the plant C blance (C assimilation equals respiration plus new growth, replacing litterfall in steady-state):
+$$
+P(aC) = (\tau/y + r)\;C \; \; \; \; \; \; \; \;(3)
+$$
 
+<!-- ```{r} -->
+<!-- c_wood <- function( ctot ){ -->
+<!--   par = 50 -->
+<!--   sqrt( ctot^2 + par ) - sqrt(par) -->
+<!-- } -->
 
-## Dynamic CN-model--------------------------------------------
-lue          = 1       # change this to two and the whole thing collapses. works best for 1. 
-ppfd         = 100
-r_ntoc_plant = 1/30
-r_ntoc_soil  = 1/10
-eff          = 0.7
-resp         = 0.1
-tau_plant    = 10
-tau_soil_c   = 50
-tau_soil_n   = 150
-tau_labl     = 0.5
-n_input      = 1.0
+<!-- c_leaf <- function( ctot ){ -->
+<!--   kl = 0.3 -->
+<!--   c_leaf_max = 20 -->
+<!--   c_leaf_max * (1 - exp(-kl*ctot)) -->
+<!-- } -->
 
-## Simulation settings
-ntsteps <- 3000
+<!-- f_leaf_of_c_ag_tot <- function( c_ag_tot ){ -->
+<!--   ifelse( c_ag_tot==0, 1.0, c_leaf( c_ag_tot ) / (c_leaf( c_ag_tot ) + c_wood( c_ag_tot )) ) -->
+<!-- } -->
+<!-- ``` -->
 
-## initialise output variables
-out_cplant_ag <- rep(NA, ntsteps)
-out_nplant_ag <- rep(NA, ntsteps)
-out_cplant_bg <- rep(NA, ntsteps)
-out_nplant_bg <- rep(NA, ntsteps)
-out_csoil     <- rep(NA, ntsteps)
-out_nsoil     <- rep(NA, ntsteps)
-out_clabl     <- rep(NA, ntsteps)
-out_nlabl     <- rep(NA, ntsteps)
+<!-- ## Static CN-model for one state------------------------------- -->
+<!-- lue  = 1 -->
+<!-- ppfd = 100 -->
+<!-- navl = 0.8 -->
+<!-- ctot = 350 -->
 
-## plant, aboveground
-cplant_ag <- 150
-nplant_ag <- cplant_ag * r_ntoc_plant
+<!-- curve( c_wood(x), from = 0, to = 50 ) -->
+<!-- curve( c_leaf(x), from = 0, to = 50, add = TRUE ) -->
+<!-- curve( f_leaf_of_c_ag_tot(x), from = 0, to = ctot ) -->
 
-## plant, belowground
-cplant_bg <- 150
-nplant_bg <- cplant_bg * r_ntoc_plant
+<!-- curve( prod( f_leaf_of_c_ag_tot( x ) * x, ppfd, lue ), from = 0, to = ctot ) -->
+<!-- curve( f_noloss, from = 0, to = ctot*2 ) -->
 
-## soil
-csoil <- 1000
-nsoil <- csoil * r_ntoc_plant * tau_soil_n/tau_soil_c
+<!-- ## Visualise imbalance curve -->
+<!-- par(mfrow=c(1,1)) -->
+<!-- curve( eval_cnbalance( x, ctot, navl, lue, ppfd ), from = 0, to = 1.0, col="red", ylim=c(-20,100) ) -->
+<!-- abline( h=0, lty=3 ) -->
+<!-- out_root <- uniroot( function(x) eval_cnbalance( x, ctot, navl, lue, ppfd ), interval=c(0,1.0) ) -->
+<!-- abline( v = out_root$root, lty = 2 ) -->
 
-## plant labile pools
-nlabl <- 0
-clabl <- 0
+<!-- ## production curve -->
+<!-- curve( prod( f_leaf_of_c_ag_tot( x ) * x, ppfd, lue ), from = 0, to = ctot ) # x is total aboveground -->
+<!-- points( out_root$root * ctot, prod( f_leaf_of_c_ag_tot( out_root$root * ctot ) * out_root$root * ctot, ppfd, lue ), pch=16, col="red" ) -->
 
-for (it in 1:ntsteps){
-
-  ## Soil turnover and net mineralisation
-  csoil          <- csoil - csoil / tau_soil_c
-  nsoil_turnover <- nsoil / tau_soil_n 
-  nsoil          <- nsoil - nsoil_turnover
-  netmin         <- nsoil_turnover + n_input
-  
-  ## actual C and N acquisition with current plant
-  clabl <- prod( f_leaf_of_c_ag_tot( cplant_ag ) * cplant_ag, ppfd, lue ) #+ clabl
-  nlabl <- f_noloss( cplant_bg ) * netmin #+ nlabl
-  
-  # ## short-cut: by-passing soil
-  # nlabl <- f_noloss( cplant_bg ) * r_ntoc_plant * (cplant_bg + cplant_ag) / tau_plant  #+ nlabl
-
-  ## limit allocatable C depending on labile N
-  c_alloc <- min( nlabl / (eff * r_ntoc_plant), clabl )
-
-  # ##----------
-  # netmin <- 0.8 # xxx test
-  # ##----------
-
-  ## Get optimal fraction to leaves
-  out_root <- uniroot( function(x) eval_cnbalance( x, ctot, netmin, lue, ppfd ), interval=c(0,1.0) )
-  fleaf <- out_root$root
-  print(fleaf)
-
-  # ##----------
-  # ## Visualise imbalance curve
-  # ctot <- (cplant_ag + cplant_bg + eff * c_alloc)
-  # par(mfrow=c(1,1))
-  # curve( eval_cnbalance( x, ctot, netmin, lue, ppfd ), from = 0, to = 1.0, col="red", ylim=c(-20,100) )
-  # abline( h=0, lty=3 )
-  # abline( v = fleaf, lty = 2 )
-
-  # ## production curve
-  # curve( prod( f_leaf_of_c_ag_tot( x ) * x, ppfd, lue ), from = 0, to = ctot ) # x is total aboveground
-  # points( fleaf * ctot, prod( f_leaf_of_c_ag_tot( fleaf * ctot ) * fleaf * ctot, ppfd, lue ), pch=16, col="red" )
-
-  # ## N uptake curve
-  # curve( netmin * f_noloss( x ), from = 0, to = ctot ) # x is total belowground
-  # points( (1.0 - fleaf) * ctot, netmin * f_noloss( (1.0 - fleaf) * ctot ), pch=16, col="red" )
-  # ##----------
-
-  ## Additional check only necessary for legacy allocation setup (Version A) 
-  # if ( eval_cnbalance( 0, ctot, netmin, lue, ppfd ) > 0.0 ){
-  #   ## all to roots
-  #   fleaf <- 0.0
-  # } else if ( eval_cnbalance( 1, ctot, netmin, lue, ppfd ) < 0.0 ){
-  #   ## all to leaves
-  #   fleaf <- 1.0
-  # } else {
-  #   ## find allocation fraction to leaves so that return next year matches (eff * r_cton_plant)
-  #   out_root <- uniroot( function(x) eval_cnbalance( x, (cplant_ag + cplant_bg + eff * c_alloc), netmin, lue, ppfd ), interval=c(1e-12,1.0) )
-  #   fleaf <- out_root$root
-  # }
-
-  ## update pools
-  clabl <- clabl - c_alloc
-  nlabl <- nlabl - eff * c_alloc * r_ntoc_plant
-
-  ## labile pool decay
-  clabl <- clabl - tau_labl * clabl
-  nlabl <- nlabl - tau_labl * nlabl
-
-  ##---------------------------------------------------------------------  
-  # ## VERSION A: fleaf only acts on new growth
-  # ## allocate C, N follows from r_ntoc_plant
-  # cturnover_ag <- cplant_ag / tau_plant
-  # c_alloc_ag   <- fleaf * c_alloc * eff
-  # cplant_ag    <- cplant_ag + c_alloc_ag - cturnover_ag
-
-  # nturnover_ag <- nplant_ag / tau_plant
-  # n_alloc_ag   <- c_alloc_ag * r_ntoc_plant
-  # nplant_ag    <- nplant_ag + n_alloc_ag - nturnover_ag
-
-  # cturnover_bg <- cplant_bg / tau_plant
-  # c_alloc_bg   <- (1.0 - fleaf) * c_alloc * eff
-  # cplant_bg    <- cplant_bg + c_alloc_bg - cturnover_bg
-
-  # nturnover_bg <- nplant_bg / tau_plant
-  # n_alloc_bg   <- c_alloc_bg * r_ntoc_plant
-  # nplant_bg    <- nplant_bg + n_alloc_bg - nturnover_bg
-  ##---------------------------------------------------------------------  
+<!-- ## N uptake curve -->
+<!-- curve( navl * f_noloss( x ), from = 0, to = ctot ) # x is total belowground -->
+<!-- points( (1.0 - out_root$root) * ctot, navl * f_noloss( (1.0 - out_root$root) * ctot ), pch=16, col="red" ) -->
 
 
-  ##---------------------------------------------------------------------  
-  ## VERSION B: fleaf redistributes entire plant (to avoid legacy in mal-allocation)
-  ## allocate C, N follows from r_ntoc_plant
-  cturnover_ag <- cplant_ag / tau_plant
-  cplant_ag    <- cplant_ag - cturnover_ag
-  cplant_ag    <- fleaf * (c_alloc * eff + cplant_ag + cplant_bg)
-  
-  nturnover_ag <- nplant_ag / tau_plant
-  nplant_ag    <- nplant_ag - nturnover_ag
-  nplant_ag    <- cplant_ag * r_ntoc_plant
-  
-  cturnover_bg <- cplant_bg / tau_plant
-  cplant_bg    <- cplant_bg - cturnover_bg
-  cplant_bg    <- (1.0 - fleaf) * (c_alloc * eff + cplant_ag + cplant_bg)
-  
-  nturnover_bg <- nplant_ag / tau_plant
-  nplant_ag    <- nplant_ag - nturnover_bg
-  nplant_ag    <- cplant_ag * r_ntoc_plant
-  ##---------------------------------------------------------------------  
+<!-- ## Dynamic CN-model-------------------------------------------- -->
+<!-- lue          = 1       # change this to two and the whole thing collapses. works best for 1.  -->
+<!-- ppfd         = 100 -->
+<!-- r_ntoc_plant = 1/30 -->
+<!-- r_ntoc_soil  = 1/10 -->
+<!-- eff          = 0.7 -->
+<!-- resp         = 0.1 -->
+<!-- tau_plant    = 10 -->
+<!-- tau_soil_c   = 50 -->
+<!-- tau_soil_n   = 150 -->
+<!-- tau_labl     = 0.5 -->
+<!-- n_input      = 1.0 -->
 
-  csoil <- csoil + cturnover_ag + cturnover_bg
-  nsoil <- nsoil + nturnover_ag + nturnover_bg
+<!-- ## Simulation settings -->
+<!-- ntsteps <- 3000 -->
 
-  ## gater output variables
-  out_cplant_ag[it] <- cplant_ag 
-  out_nplant_ag[it] <- nplant_ag 
-  out_cplant_bg[it] <- cplant_bg 
-  out_nplant_bg[it] <- nplant_bg 
-  out_csoil[it]     <- csoil     
-  out_nsoil[it]     <- nsoil     
-  out_clabl[it]     <- clabl     
-  out_nlabl[it]     <- nlabl     
+<!-- ## initialise output variables -->
+<!-- out_cplant_ag <- rep(NA, ntsteps) -->
+<!-- out_nplant_ag <- rep(NA, ntsteps) -->
+<!-- out_cplant_bg <- rep(NA, ntsteps) -->
+<!-- out_nplant_bg <- rep(NA, ntsteps) -->
+<!-- out_csoil     <- rep(NA, ntsteps) -->
+<!-- out_nsoil     <- rep(NA, ntsteps) -->
+<!-- out_clabl     <- rep(NA, ntsteps) -->
+<!-- out_nlabl     <- rep(NA, ntsteps) -->
 
-}
-##---------------------------------------------------------
-plot( 1:ntsteps, out_cplant_ag )
-plot( 1:ntsteps, out_cplant_bg )
-plot( 1:ntsteps, out_csoil )
-plot( 1:ntsteps, out_nsoil )
-plot( 1:ntsteps, out_clabl )
-plot( 1:ntsteps, out_nlabl )
-plot( 1:ntsteps, out_cplant_ag/(out_cplant_bg+out_cplant_ag) )
+<!-- ## plant, aboveground -->
+<!-- cplant_ag <- 150 -->
+<!-- nplant_ag <- cplant_ag * r_ntoc_plant -->
+
+<!-- ## plant, belowground -->
+<!-- cplant_bg <- 150 -->
+<!-- nplant_bg <- cplant_bg * r_ntoc_plant -->
+
+<!-- ## soil -->
+<!-- csoil <- 1000 -->
+<!-- nsoil <- csoil * r_ntoc_plant * tau_soil_n/tau_soil_c -->
+
+<!-- ## plant labile pools -->
+<!-- nlabl <- 0 -->
+<!-- clabl <- 0 -->
+
+<!-- for (it in 1:ntsteps){ -->
+
+<!--   ## Soil turnover and net mineralisation -->
+<!--   csoil          <- csoil - csoil / tau_soil_c -->
+<!--   nsoil_turnover <- nsoil / tau_soil_n  -->
+<!--   nsoil          <- nsoil - nsoil_turnover -->
+<!--   netmin         <- nsoil_turnover + n_input -->
+
+<!--   ## actual C and N acquisition with current plant -->
+<!--   clabl <- prod( f_leaf_of_c_ag_tot( cplant_ag ) * cplant_ag, ppfd, lue ) #+ clabl -->
+<!--   nlabl <- f_noloss( cplant_bg ) * netmin #+ nlabl -->
+
+<!--   # ## short-cut: by-passing soil -->
+<!--   # nlabl <- f_noloss( cplant_bg ) * r_ntoc_plant * (cplant_bg + cplant_ag) / tau_plant  #+ nlabl -->
+
+<!--   ## limit allocatable C depending on labile N -->
+<!--   c_alloc <- min( nlabl / (eff * r_ntoc_plant), clabl ) -->
+
+<!--   # ##---------- -->
+<!--   # netmin <- 0.8 # xxx test -->
+<!--   # ##---------- -->
+
+<!--   ## Get optimal fraction to leaves -->
+<!--   out_root <- uniroot( function(x) eval_cnbalance( x, ctot, netmin, lue, ppfd ), interval=c(0,1.0) ) -->
+<!--   fleaf <- out_root$root -->
+<!--   print(fleaf) -->
+
+<!--   # ##---------- -->
+<!--   # ## Visualise imbalance curve -->
+<!--   # ctot <- (cplant_ag + cplant_bg + eff * c_alloc) -->
+<!--   # par(mfrow=c(1,1)) -->
+<!--   # curve( eval_cnbalance( x, ctot, netmin, lue, ppfd ), from = 0, to = 1.0, col="red", ylim=c(-20,100) ) -->
+<!--   # abline( h=0, lty=3 ) -->
+<!--   # abline( v = fleaf, lty = 2 ) -->
+
+<!--   # ## production curve -->
+<!--   # curve( prod( f_leaf_of_c_ag_tot( x ) * x, ppfd, lue ), from = 0, to = ctot ) # x is total aboveground -->
+<!--   # points( fleaf * ctot, prod( f_leaf_of_c_ag_tot( fleaf * ctot ) * fleaf * ctot, ppfd, lue ), pch=16, col="red" ) -->
+
+<!--   # ## N uptake curve -->
+<!--   # curve( netmin * f_noloss( x ), from = 0, to = ctot ) # x is total belowground -->
+<!--   # points( (1.0 - fleaf) * ctot, netmin * f_noloss( (1.0 - fleaf) * ctot ), pch=16, col="red" ) -->
+<!--   # ##---------- -->
+
+<!--   ## Additional check only necessary for legacy allocation setup (Version A)  -->
+<!--   # if ( eval_cnbalance( 0, ctot, netmin, lue, ppfd ) > 0.0 ){ -->
+<!--   #   ## all to roots -->
+<!--   #   fleaf <- 0.0 -->
+<!--   # } else if ( eval_cnbalance( 1, ctot, netmin, lue, ppfd ) < 0.0 ){ -->
+<!--   #   ## all to leaves -->
+<!--   #   fleaf <- 1.0 -->
+<!--   # } else { -->
+<!--   #   ## find allocation fraction to leaves so that return next year matches (eff * r_cton_plant) -->
+<!--   #   out_root <- uniroot( function(x) eval_cnbalance( x, (cplant_ag + cplant_bg + eff * c_alloc), netmin, lue, ppfd ), interval=c(1e-12,1.0) ) -->
+<!--   #   fleaf <- out_root$root -->
+<!--   # } -->
+
+<!--   ## update pools -->
+<!--   clabl <- clabl - c_alloc -->
+<!--   nlabl <- nlabl - eff * c_alloc * r_ntoc_plant -->
+
+<!--   ## labile pool decay -->
+<!--   clabl <- clabl - tau_labl * clabl -->
+<!--   nlabl <- nlabl - tau_labl * nlabl -->
+
+<!--   ##---------------------------------------------------------------------   -->
+<!--   # ## VERSION A: fleaf only acts on new growth -->
+<!--   # ## allocate C, N follows from r_ntoc_plant -->
+<!--   # cturnover_ag <- cplant_ag / tau_plant -->
+<!--   # c_alloc_ag   <- fleaf * c_alloc * eff -->
+<!--   # cplant_ag    <- cplant_ag + c_alloc_ag - cturnover_ag -->
+
+<!--   # nturnover_ag <- nplant_ag / tau_plant -->
+<!--   # n_alloc_ag   <- c_alloc_ag * r_ntoc_plant -->
+<!--   # nplant_ag    <- nplant_ag + n_alloc_ag - nturnover_ag -->
+
+<!--   # cturnover_bg <- cplant_bg / tau_plant -->
+<!--   # c_alloc_bg   <- (1.0 - fleaf) * c_alloc * eff -->
+<!--   # cplant_bg    <- cplant_bg + c_alloc_bg - cturnover_bg -->
+
+<!--   # nturnover_bg <- nplant_bg / tau_plant -->
+<!--   # n_alloc_bg   <- c_alloc_bg * r_ntoc_plant -->
+<!--   # nplant_bg    <- nplant_bg + n_alloc_bg - nturnover_bg -->
+<!--   ##---------------------------------------------------------------------   -->
+
+
+<!--   ##---------------------------------------------------------------------   -->
+<!--   ## VERSION B: fleaf redistributes entire plant (to avoid legacy in mal-allocation) -->
+<!--   ## allocate C, N follows from r_ntoc_plant -->
+<!--   cturnover_ag <- cplant_ag / tau_plant -->
+<!--   cplant_ag    <- cplant_ag - cturnover_ag -->
+<!--   cplant_ag    <- fleaf * (c_alloc * eff + cplant_ag + cplant_bg) -->
+
+<!--   nturnover_ag <- nplant_ag / tau_plant -->
+<!--   nplant_ag    <- nplant_ag - nturnover_ag -->
+<!--   nplant_ag    <- cplant_ag * r_ntoc_plant -->
+
+<!--   cturnover_bg <- cplant_bg / tau_plant -->
+<!--   cplant_bg    <- cplant_bg - cturnover_bg -->
+<!--   cplant_bg    <- (1.0 - fleaf) * (c_alloc * eff + cplant_ag + cplant_bg) -->
+
+<!--   nturnover_bg <- nplant_ag / tau_plant -->
+<!--   nplant_ag    <- nplant_ag - nturnover_bg -->
+<!--   nplant_ag    <- cplant_ag * r_ntoc_plant -->
+<!--   ##---------------------------------------------------------------------   -->
+
+<!--   csoil <- csoil + cturnover_ag + cturnover_bg -->
+<!--   nsoil <- nsoil + nturnover_ag + nturnover_bg -->
+
+<!--   ## gater output variables -->
+<!--   out_cplant_ag[it] <- cplant_ag  -->
+<!--   out_nplant_ag[it] <- nplant_ag  -->
+<!--   out_cplant_bg[it] <- cplant_bg  -->
+<!--   out_nplant_bg[it] <- nplant_bg  -->
+<!--   out_csoil[it]     <- csoil      -->
+<!--   out_nsoil[it]     <- nsoil      -->
+<!--   out_clabl[it]     <- clabl      -->
+<!--   out_nlabl[it]     <- nlabl      -->
+
+<!-- } -->
+<!-- ##--------------------------------------------------------- -->
+<!-- plot( 1:ntsteps, out_cplant_ag ) -->
+<!-- plot( 1:ntsteps, out_cplant_bg ) -->
+<!-- plot( 1:ntsteps, out_csoil ) -->
+<!-- plot( 1:ntsteps, out_nsoil ) -->
+<!-- plot( 1:ntsteps, out_clabl ) -->
+<!-- plot( 1:ntsteps, out_nlabl ) -->
+<!-- plot( 1:ntsteps, out_cplant_ag/(out_cplant_bg+out_cplant_ag) ) -->
