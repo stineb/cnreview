@@ -116,12 +116,14 @@ $$
 $$
 Here, $\tau$ is the residence time of C and N in the plant pool; $\nin$ is the external input of N, subsuming atmospheric deposition and weathering. Using this, the steady-state solution of the coupled soil-plant system can be found, without relying on prescribed net mineralisation rates, with the balanced-growth condition:
 $$
-\frac{ y [ P(aC) - rC ] }{ f((1-a)C)\frac{C}{\rcton\tau} +\nin } - r_{\text{C:N}} = 0 \; \; \; \;\; \; \; \;(2)
+\frac{ y [ P(aC) - rC ] }{ f((1-a)C)(\frac{C}{\rcton\tau} +\nin) } - r_{\text{C:N}} = 0 \; \; \; \;\; \; \; \;(2)
 $$
 and the plant C blance (C assimilation equals respiration plus new growth, replacing litterfall in steady-state):
 $$
 P(aC) = (\tau/y + r)\;C \; \; \; \; \; \; \; \;(3)
 $$
+This set of two equations should in theory allow us to cancel $C$ and solve for $a$ as a function of environmental conditions: $a = f(\varepsilon, I, \nin)$. Note that $\varepsilon$ is not treated here as a parameter because it's itself a function of environmental conditions.
+
 
 <!-- ```{r} -->
 <!-- c_wood <- function( ctot ){ -->
