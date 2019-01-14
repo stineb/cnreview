@@ -120,9 +120,44 @@ $$
 $$
 and the plant C blance (C assimilation equals respiration plus new growth, replacing litterfall in steady-state):
 $$
-P(aC) = (\tau/y + r)\;C \; \; \; \; \; \; \; \;(3)
+P(aC) - (\tau/y + r)\;C = 0 \; \; \; \; \; \; \; \;(3)
 $$
-This set of two equations should in theory allow us to cancel $C$ and solve for $a$ as a function of environmental conditions: $a = f(\varepsilon, I, \nin)$. Note that $\varepsilon$ is not treated here as a parameter because it's itself a function of environmental conditions.
+This set of two equations should in theory allow us to cancel $C$ and solve for $a$ as a function of environmental conditions: $a = f(\varepsilon, I, \nin)$. Note that $\varepsilon$ is not treated here as a parameter because it's itself a function of environmental conditions. Let's not try to get the analytical solution here. It will involve Weibull functions anyways, and these have to be solved numerically. Let's just throw it at `nleqslv()`.
+
+```{r}
+library(nleqslv)
+
+## Equation system as a function returning a vector of two values, both of which are to be set to zero by the optimiser
+fn <- function( par ){
+  eff  <- 0.7
+  resp <- 0.1
+  r_cton_plant <- 30
+  tau_plant <- 10
+  n_in <- 1.0
+
+  out <- numeric(2)
+  ctot <- par[1]
+  f_ag <- par[2]
+  
+  out[1] <- eval_cnbalance( f_ag, ctot, ( ctot/(r_cton_plant * tau_plant) + n_in), lue, ppfd )
+  out[2] <- prod( f_ag * ctot, ppfd, lue ) - ctot * ( tau_plant/eff + resp )
+  
+  return(out)
+}
+
+steadystate <- nleqslv( c(500, 0.5), fn, control = list( allowSingular=TRUE ) )
+
+## test
+ctot <- steadystate$x[[1]]
+f_ag <- steadystate$x[[2]]
+  eff  <- 0.7
+  resp <- 0.1
+  r_cton_plant <- 30
+  tau_plant <- 10
+  n_in <- 1.0
+  print(paste("should be zero:", eval_cnbalance( f_ag, ctot, ( ctot/(r_cton_plant * tau_plant) + n_in), lue, ppfd ) ))
+  print(paste("should be zero:", prod( f_ag * ctot, ppfd, lue ) - ctot * ( tau_plant/eff + resp ) ))
+```
 
 
 <!-- ```{r} -->
