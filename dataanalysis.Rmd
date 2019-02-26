@@ -1,0 +1,126 @@
+---
+title: "CO2 experimental data analysis"
+author: "Beni Stocker"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    #theme: paper
+    toc: true
+    toc_float: true
+    toc_depth: 2
+# output:
+#   pdf_document:
+#     toc: true
+#     toc_depth: 2
+header-includes:
+   - \usepackage{amsmath}
+# bibliography: bibliography.bib
+---
+
+
+# Data screening
+
+Load file that Kevin sent on 26.2.2019.
+```{r}
+library(readr)
+df <- read_csv("~/data/gcme/data_received_190225/NewData_wide.csv")
+```
+
+We want to do the following:
+
+1. Select experiments where CO2 was manipulated
+2. For each experiment, determine whether data is available for a set of variables of interest
+3. Calculate (or extract) the CO2 effect (log-response) and its error for each variable of interest for which we have data, for each experiment separately.
+4. Get information on the number of replicates available for each experiment (and any other information that is needed for the meta analysis).
+5. Do meta-analysis, making use of multiple experiments' data for each variable of interest
+
+Let's check first if the data is ready to use for these steps.
+
+WARNING: I had to first replace some invalid UTF-8 characters by hand and "save over" the file Kevin sent:
+
+- renaming `NŒntuna` to `noentuna`
+- renaming `KopparŒsmyren` to `kopparoesmyren`
+
+## 1. Select experiments
+
+This information is based on the column `factors`:
+```{r}
+library(dplyr)
+unique(df$factors) %>% print()
+```
+
+- We should harmonize this, and use the (unique) codes for all (e.g., avoid `"DroughtxFertilizationxCO2"`, but instead use `dfc`, right?). I guess we want this so that permutations are allowed, e.g., `cwd` is equivalent to `wcd`.
+- What do the individual letters of the codes stand for?
+- Check missing information (`"?"`, `NA`)
+
+Finally, we should be able to filter our data frame based on the information in `factors` as:
+```{r}
+df_co2 <- df %>% filter( grepl("c", factors) )
+```
+
+## 2. Variables per experiment
+
+For each experiment, determine whether data is available for a set of variables of interest.
+```{r}
+library(purrr)
+exp_varlist <- purrr::map( as.list(unique(df_co2$exp_nam)), ~filter(df_co2, exp_nam==.) %>% select(Data_type) %>% unlist() %>% unique() ) %>% 
+  setNames( unique(df_co2$exp_nam) )
+```
+
+This seems to work. We now have a named list, providing the available variables for each CO2 experiment. Not sure if we need that, actually...
+
+## 3. Get CO2 effect
+
+First, create a data frame that contains information for each experiment, whether Asat data is available. Not sure if we need that, actually...
+```{r eval=FALSE}
+library(tidyr)
+exp_co2_asat <- purrr::map_dfc( varlist, ~is.element("Asat", .) ) %>% 
+  gather("exp_name", "avl_Asat")
+```
+
+Calculate (or extract) the CO2 effect (log-response) and its error for each variable of interest for which we have data, for each experiment separately. Let's start with one variable: `Asat` (and hope that's how it's called for all experiments).
+
+```{r}
+df_co2_asat <- df_co2 %>% filter( Data_type=="Asat" ) 
+```
+
+Once we have a list of variables, and the exact and consistent variable names in the dataset we can create a list of data frames as:
+```{r}
+varlist <- c("Asat", "decomp", "leafN", "anpp" )  # just an example
+list_co2_byvar <- purrr::map( as.list(varlist), ~filter(df_co2, Data_type == .)) %>% 
+  setNames(varlist)
+```
+
+
+Let's look at data from just one experiment (`"SwissFACE_trifolium2"`):
+```{r}
+df_co2_asat %>% filter(exp_nam == "SwissFACE_trifolium2") %>% print()
+```
+
+This data frame now has multiple rows, corresponding to different sampling dates. Some points here:
+
+- The row Sampling_date is not very clean and cannot coerced into a date object (preferrable to be done with the R package lubridate). This is (almost) ok for now (we're just treating this as replicates, disregarding the information of the date), but needs to be addressed when using the data for model-data fusion (need to "sample" the model output at the same date). However ...
+- ... if we are to use 'experiment year since the start' as a factor in our analysis, this needs to be addressed. Either, we try to get the actual sampling date as a lubridate-ymd object (looks like "YY-MM-DD"), and have separate experiment meta information where the start year of the experiment is specified. Or, we just have a row in this data frame here, that specifies the experiment year (year=1 is the first year under treatment, year=0 is the last year of the pre-treatment period, or similar).
+- Units are $\mu$ mol? The respective character is not interpreted correctly. This is ok for now, as we are only looking only at response ratios.
+- In this example (site `"SwissFACE_trifolium2"`), I am confused about the information given in column `factors` (is `"cf"` for all rows displayed above). I interpret this as saying that this particular experiment was a 2-factorial experiment with a CO2 and fertilization treatment. However, the rows displayed here are only for the CO2-only treatment. Where are the remaining rows?
+- **Fundamental question:** In a multi-factorial experiment (let's stick with the example of `"SwissFACE_trifolium2"`), where one factor is CO2, and when trying to quantify the *CO2 effect*, we should use data both from the CO2-only and from the CO2xFertilization treatment and quantify *two* response ratios as c/control and cf/f. Do you agree? The way the data is structured now, it's not straight-forward to get these two response ratios as rows for the *cf* treatment use elevated as *cf*, and ambient as control, not *f*. Hence, the data first needs to be reshaped a bit... Probably best by converting it first to a long format. But let's solve the other points first.
+
+
+## 4. Number of replicates
+
+For each variable, get information on the number of replicates available for each experiment (and any other information that is needed for the meta analysis). That's simple now:
+```{r}
+## for Asat only
+df_nreplicates_asat <- df_co2_asat %>% 
+  group_by(exp_nam) %>% 
+  summarise(nreplicates = n())
+
+## for all variables, creates a named list
+list_nreplicates <- purrr::map( list_co2_byvar, ~group_by(., exp_nam, treatment) %>% 
+  summarise(nrep = n()) ) %>% 
+  setNames(varlist)
+```
+
+## 5. Do the meta-analysis
+
+Do meta-analysis, making use of multiple experiments' data for each variable of interest. Let's first address remaining points above before doing this.
