@@ -20,107 +20,341 @@ header-includes:
 
 # Data screening
 
-Load file that Kevin sent on 26.2.2019.
-```{r}
-library(readr)
-df <- read_csv("~/data/gcme/data_received_190225/NewData_wide.csv")
-```
+For a first data screening want to do the following:
 
-We want to do the following:
-
-1. Select experiments where CO2 was manipulated
-2. For each experiment, determine whether data is available for a set of variables of interest
-3. Calculate (or extract) the CO2 effect (log-response) and its error for each variable of interest for which we have data, for each experiment separately.
-4. Get information on the number of replicates available for each experiment (and any other information that is needed for the meta analysis).
-5. Do meta-analysis, making use of multiple experiments' data for each variable of interest
+1. Get data from eCO2 experiments
+2. Data availability per experiment
+3. Data availability per variable
+4. Long versus wide issue
 
 Let's check first if the data is ready to use for these steps.
 
-WARNING: I had to first replace some invalid UTF-8 characters by hand and "save over" the file Kevin sent:
+But before we start:
 
-- renaming `NŒntuna` to `noentuna`
-- renaming `KopparŒsmyren` to `kopparoesmyren`
+- Some variable names end with an underscore (`ANPP_`, `Asat_`, `SLA_`, `coarse_root_biomass_`, `LMA_`, `soil_NH4+_`, `N_uptake_`). Needed to delete that manually.
+- Replaced lots of superscripted numbers (actually appeared as superscript when opening the CSV file in my text editor) with plain number (e.g., `m2`)
+- Replaced units given like `g_m-2` with `g/m2`, or `kg_ha-1` with `kg/ha`, or `g/m2*yr` with `g/m2/yr` (assuming that's correct if that's the way it would be entered in R), `_g/m2` with `g/m2`, `cm2/m2*d` with `cm2/m2/d`, ... I'll leave it with that for now.
+- Replaced `Vcmax_normalized_to_25°C` with `Vcmax25`, and `Jmax_normalized_to_25°C` with `Jmax25` (problematic degree sign)
 
-## 1. Select experiments
+**All that is saved as a new file `NewData_wide_CORRECTED.csv`**
 
-This information is based on the column `factors`:
-```{r}
+Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
+```{r, warning=FALSE}
+library(readr)
+df <- read_csv("~/data/gcme/data_received_190301/NewData_wide_CORRECTED.csv")
+```
+
+
+## 1. Get data from eCO2 experiments
+
+Get information on what factors (`factors`) are available:
+```{r, warning=FALSE}
 library(dplyr)
 unique(df$factors) %>% print()
 ```
 
-- We should harmonize this, and use the (unique) codes for all (e.g., avoid `"DroughtxFertilizationxCO2"`, but instead use `dfc`, right?). I guess we want this so that permutations are allowed, e.g., `cwd` is equivalent to `wcd`.
-- What do the individual letters of the codes stand for?
-- Check missing information (`"?"`, `NA`)
+Great! This looks nice and clean. There is one `"x99"`, coming from the "Niigata" experiment, which needs to be corrected.
 
-Finally, we should be able to filter our data frame based on the information in `factors` as:
-```{r}
-df_co2 <- df %>% filter( grepl("c", factors) )
+Filter only data from experiments where CO2 was manipulated. The way the data is organised here, a full factorial (eCO2 x N-fertilisation) experiment, which has four treatments (including the control), should have three rows in our dataset: eCO2-only, N-fertilisation-only, eCO2 $\times$ N-fertilisation). Such an experiment is identified as `factors %in% c("cf", "fc")`. SwissFACE_lolium2 is an example for such an experiment:
+
+```{r, warning=FALSE}
+df %>% filter( exp_nam == "SwissFACE_lolium2" ) %>% select(exp_nam, factors, treatment) %>% unique() %>% print()
+```
+Confirmed.
+
+For our analysis, we're only interested in the treatments where CO2 was elevated. That is, `treatment` should contain a `"c"`. Filter only this data by:
+```{r, warning=FALSE}
+df_co2 <- df %>% filter( grepl("c", treatment) )
 ```
 
-## 2. Variables per experiment
+**Issue:**
 
-For each experiment, determine whether data is available for a set of variables of interest.
-```{r}
+- Maybe it makes sense to exclude experiments where N was added. Does it?
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% filter( !grepl("f", treatment) )
+```
+
+
+We have a stunning ...
+```{r, warning=FALSE}
+print( paste( "... number of data points:", nrow(df_co2) ) )
+```
+
+
+## 2. Data availability per experiment
+
+For each experiment, collect all available variables.
+```{r, warning=FALSE}
 library(purrr)
-exp_varlist <- purrr::map( as.list(unique(df_co2$exp_nam)), ~filter(df_co2, exp_nam==.) %>% select(Data_type) %>% unlist() %>% unique() ) %>% 
-  setNames( unique(df_co2$exp_nam) )
-```
-
-This seems to work. We now have a named list, providing the available variables for each CO2 experiment. Not sure if we need that, actually...
-
-## 3. Get CO2 effect
-
-First, create a data frame that contains information for each experiment, whether Asat data is available. Not sure if we need that, actually...
-```{r eval=FALSE}
 library(tidyr)
-exp_co2_asat <- purrr::map_dfc( varlist, ~is.element("Asat", .) ) %>% 
-  gather("exp_name", "avl_Asat")
+#exp_varlist <- purrr::map( as.list(unique(df_co2$exp_nam)), ~filter(df_co2, exp_nam==.) %>% select(Data_type) %>% unlist() %>% unique() ) %>% 
+#  setNames( unique(df_co2$exp_nam) )
+
+df_avl_byexp <- df_co2 %>% 
+  group_by( exp_nam ) %>% 
+  nest() %>% 
+  mutate( variables = purrr::map( data, ~unique( .$Data_type ) ),
+          factors   = purrr::map( data, ~unique( .$factors ) ),
+          treatment = purrr::map( data, ~unique( .$treatment ) )
+        ) %>% 
+  mutate( n_variables = purrr::map_int( variables, ~length(.)),
+          n_factors   = purrr::map_int( factors,   ~length(.)),
+          n_treatment = purrr::map_int( treatment, ~length(.)),
+          n_datap     = purrr::map_int( data, ~sum(.$n_plots)) 
+          )
+
+# show top 100 rows
+df_avl_byexp %>% 
+  select(exp_nam, factors, treatment, n_variables, n_datap ) %>% 
+  arrange( desc(n_datap) ) %>%
+  slice( 1:100 ) %>% 
+  knitr::kable() #slice(1:50) %>% View() # 
 ```
 
-Calculate (or extract) the CO2 effect (log-response) and its error for each variable of interest for which we have data, for each experiment separately. Let's start with one variable: `Asat` (and hope that's how it's called for all experiments).
+**Issue:**
 
-```{r}
-df_co2_asat <- df_co2 %>% filter( Data_type=="Asat" ) 
+- For some experiments, multiple different entries are available for `factors`. Shouldn't this always be a single entry for factor for a given experiment?
+
+<!-- ## 3. Get CO2 effect -->
+
+<!-- First, create a data frame that contains information for each experiment, whether Asat data is available. Not sure if we need that, actually... -->
+<!-- ```{r eval=FALSE} -->
+<!-- library(tidyr) -->
+<!-- exp_co2_asat <- purrr::map_dfc( exp_varlist, ~is.element("Asat", .) ) %>%  -->
+<!--   gather("exp_name", "avl_Asat") -->
+<!-- ``` -->
+
+<!-- Calculate (or extract) the CO2 effect (log-response) and its error for each variable of interest for which we have data, for each experiment separately. Let's start with one variable: `Asat` (and hope that's how it's called for all experiments). -->
+
+<!-- ```{r, warning=FALSE} -->
+<!-- df_co2_asat <- df_co2 %>% filter( Data_type=="Asat" )  -->
+<!-- ``` -->
+
+<!-- Once we have a list of variables, and the exact and consistent variable names in the dataset we can create a list of data frames as: -->
+<!-- ```{r, warning=FALSE} -->
+<!-- varlist <- c("Asat", "decomp", "leafN", "anpp" )  # just an example -->
+<!-- list_co2_byvar <- purrr::map( as.list(varlist), ~filter(df_co2, Data_type == .)) %>%  -->
+<!--   setNames(varlist) -->
+<!-- ``` -->
+
+
+## 3. Data availability per variable
+
+Summarise data availability per variable (`Data_type`):
+
+- One column for number of "experiments". Here, different treatments within one experiments (`exp_nam`) are counted as separate "experiments".
+- One 
+
+```{r, warning=FALSE}
+library(knitr)
+# second way
+df_avl_byvar <- df_co2 %>% 
+  group_by( Data_type ) %>% 
+  nest() %>% 
+  mutate( experiments = purrr::map( data, ~unique( .$exp_nam ) ) ) %>% 
+  mutate( n_experiments = purrr::map_int( experiments, ~length(.)),
+          n_datap       = purrr::map_int( data, ~sum(.$n_plots)),
+          n_exp_treat   = purrr::map_int( data, ~n_distinct(.$exp_nam, .$treatment))
+          )
+
+# show top 100 rows by n_datap
+df_avl_byvar %>% 
+  arrange(desc(n_datap)) %>% 
+  select(Data_type, n_experiments, n_exp_treat, n_datap) %>% 
+  slice(1:50) %>% 
+  knitr::kable() #%>% View() #
+
 ```
 
-Once we have a list of variables, and the exact and consistent variable names in the dataset we can create a list of data frames as:
-```{r}
-varlist <- c("Asat", "decomp", "leafN", "anpp" )  # just an example
-list_co2_byvar <- purrr::map( as.list(varlist), ~filter(df_co2, Data_type == .)) %>% 
-  setNames(varlist)
+**Issue**
+
+- Some variable names are odd, maybe incorrectly read into R:
+```{r, warning=FALSE}
+df_avl_byvar %>% select(Data_type) %>% slice(1:9) %>% print()
 ```
 
 
-Let's look at data from just one experiment (`"SwissFACE_trifolium2"`):
-```{r}
-df_co2_asat %>% filter(exp_nam == "SwissFACE_trifolium2") %>% print()
+<!-- ## 4. Long versus wide issue -->
+
+<!-- Let's look at data from just one experiment (`"SwissFACE_trifolium2"`): -->
+<!-- ```{r, warning=FALSE} -->
+<!-- df_co2 %>% filter(exp_nam == "SwissFACE_trifolium2") %>% print() -->
+<!-- ``` -->
+
+<!-- This data frame now has multiple rows, corresponding to different sampling dates. Some points here: -->
+
+<!-- - The row Sampling_date is not very clean and cannot coerced into a date object (preferrable to be done with the R package lubridate). This is (almost) ok for now (we're just treating this as replicates, disregarding the information of the date), but needs to be addressed when using the data for model-data fusion (need to "sample" the model output at the same date). However ... -->
+<!-- - ... if we are to use 'experiment year since the start' as a factor in our analysis, this needs to be addressed. Either, we try to get the actual sampling date as a lubridate-ymd object (looks like "YY-MM-DD"), and have separate experiment meta information where the start year of the experiment is specified. Or, we just have a row in this data frame here, that specifies the experiment year (year=1 is the first year under treatment, year=0 is the last year of the pre-treatment period, or similar). -->
+<!-- - Units are $\mu$ mol? The respective character is not interpreted correctly. This is ok for now, as we are only looking only at response ratios. -->
+<!-- - In this example (site `"SwissFACE_trifolium2"`), I am confused about the information given in column `factors` (is `"cf"` for all rows displayed above). I interpret this as saying that this particular experiment was a 2-factorial experiment with a CO2 and fertilization treatment. However, the rows displayed here are only for the CO2-only treatment. Where are the remaining rows? -->
+<!-- - **Fundamental question:** In a multi-factorial experiment (let's stick with the example of `"SwissFACE_trifolium2"`), where one factor is CO2, and when trying to quantify the *CO2 effect*, we should use data both from the CO2-only and from the CO2xFertilization treatment and quantify *two* response ratios as c/control and cf/f. Do you agree? The way the data is structured now, it's not straight-forward to get these two response ratios as rows for the *cf* treatment use elevated as *cf*, and ambient as control, not *f*. Hence, the data first needs to be reshaped a bit... Probably best by converting it first to a long format. But let's solve the other points first. -->
+
+
+<!-- ## 4. Number of replicates -->
+
+<!-- For each variable, get information on the number of replicates available for each experiment (and any other information that is needed for the meta analysis). That's simple now: -->
+<!-- ```{r, warning=FALSE} -->
+<!-- ## for Asat only -->
+<!-- df_nreplicates_asat <- df_co2_asat %>%  -->
+<!--   group_by(exp_nam) %>%  -->
+<!--   summarise(nreplicates = n()) -->
+
+<!-- ## for all variables, creates a named list -->
+<!-- list_nreplicates <- purrr::map( list_co2_byvar, ~group_by(., exp_nam, treatment) %>%  -->
+<!--   summarise(nrep = n()) ) %>%  -->
+<!--   setNames(varlist) -->
+<!-- ``` -->
+
+
+
+
+# Data selection
+
+The initial draft of the figures we want to draw looks like this:
+
+![](./fig/cn_feedback_cascade_draft.jpg)
+
+The following is a list of variables we need according to this draft, and the corresponding (possibly) relevant variables (`Data_type`) in our dataset. 
+
+**Issue: Please revise whether these variables (`Data_type`) are the right ones to use. See `df_avl_byvar` for an overview.**
+
+- Asat (light-saturated assimilation rate): `Anet` (**OK here?**), `Amax`, `Asat`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = NA ) %>% mutate( my_var = ifelse( Data_type %in% c("Amax", "Asat"), "my_asat", my_var ) )
 ```
 
-This data frame now has multiple rows, corresponding to different sampling dates. Some points here:
+- GPP: `GPP`
 
-- The row Sampling_date is not very clean and cannot coerced into a date object (preferrable to be done with the R package lubridate). This is (almost) ok for now (we're just treating this as replicates, disregarding the information of the date), but needs to be addressed when using the data for model-data fusion (need to "sample" the model output at the same date). However ...
-- ... if we are to use 'experiment year since the start' as a factor in our analysis, this needs to be addressed. Either, we try to get the actual sampling date as a lubridate-ymd object (looks like "YY-MM-DD"), and have separate experiment meta information where the start year of the experiment is specified. Or, we just have a row in this data frame here, that specifies the experiment year (year=1 is the first year under treatment, year=0 is the last year of the pre-treatment period, or similar).
-- Units are $\mu$ mol? The respective character is not interpreted correctly. This is ok for now, as we are only looking only at response ratios.
-- In this example (site `"SwissFACE_trifolium2"`), I am confused about the information given in column `factors` (is `"cf"` for all rows displayed above). I interpret this as saying that this particular experiment was a 2-factorial experiment with a CO2 and fertilization treatment. However, the rows displayed here are only for the CO2-only treatment. Where are the remaining rows?
-- **Fundamental question:** In a multi-factorial experiment (let's stick with the example of `"SwissFACE_trifolium2"`), where one factor is CO2, and when trying to quantify the *CO2 effect*, we should use data both from the CO2-only and from the CO2xFertilization treatment and quantify *two* response ratios as c/control and cf/f. Do you agree? The way the data is structured now, it's not straight-forward to get these two response ratios as rows for the *cf* treatment use elevated as *cf*, and ambient as control, not *f*. Hence, the data first needs to be reshaped a bit... Probably best by converting it first to a long format. But let's solve the other points first.
-
-
-## 4. Number of replicates
-
-For each variable, get information on the number of replicates available for each experiment (and any other information that is needed for the meta analysis). That's simple now:
-```{r}
-## for Asat only
-df_nreplicates_asat <- df_co2_asat %>% 
-  group_by(exp_nam) %>% 
-  summarise(nreplicates = n())
-
-## for all variables, creates a named list
-list_nreplicates <- purrr::map( list_co2_byvar, ~group_by(., exp_nam, treatment) %>% 
-  summarise(nrep = n()) ) %>% 
-  setNames(varlist)
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("GPP"), "my_gpp", my_var ) )
 ```
 
-## 5. Do the meta-analysis
+- NPP: `NPP`
 
-Do meta-analysis, making use of multiple experiments' data for each variable of interest. Let's first address remaining points above before doing this.
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("NPP"), "my_npp", my_var ) )
+```
+
+- **Or:** ANPP: `ANPP`, `annual_aboveground_biomass_production`, `aboveground_production`, `annual_aboveground_biomass_production`, `aboveground_biomass_production`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("ANPP", "annual_aboveground_biomass_production", "aboveground_production", "annual_aboveground_biomass_production", "aboveground_biomass_production"), "my_anpp", my_var ) )
+```
+
+- N uptake: `N_uptake`, `NH4+_uptake` (**OK here?**), 
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("N_uptake", "NH4+_uptake"), "my_nup", my_var ) )
+```
+
+- N availability: `soil_NO3-`, `soil_NH4+`, `soil_NH4-N`, `soil_mineral_N`, `mineral_soil_N`, `resin_NH4+`, `resin_NO3-`. **What about organic N:** `soil_extractable_organic_N`, `soil_dissolved_organic_N`, `soil_DON`,
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("soil_NO3-", "soil_NH4+", "soil_NH4-N", "soil_mineral_N", "mineral_soil_N", "resin_NH4+", "resin_NO3-"), "my_navl", my_var ) )
+```
+
+- N fixation: `number_of_nodes` **Only this data available?**
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("number_of_nodes"), "my_nfix", my_var ) )
+```
+
+- Belowground C allocation: `root_biomass`, `root_biomass_(>2mm)`, `root_C`, `root_growth`, `root_mass`, `belowground_biomass`, `belowground_biomass_C`, `belowground_C`, `coarse_root_biomass` (**OK here?**), `fine_root_biomass`, `fine_root_production`, `BNPP`, `root_biomass_input`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("root_biomass", "root_biomass_(>2mm)", "root_C", "root_growth", "root_mass", "belowground_biomass", "belowground_biomass_C", "belowground_C", "coarse_root_biomass", "fine_root_biomass", "fine_root_production", "BNPP", "root_biomass_input"), "my_croot", my_var ) )
+```
+
+- Root:shoot ratio: `root-shoot_ratio`, `R/S` (**Is that what it means?**)
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("root-shoot_ratio", "R/S"), "my_rootshoot", my_var ) )
+```
+
+- SOM decomposition: `litter_decomposition` (**OK only if it's a relative rate**), `net_C_mineralization`, `aboveground_litter_C_mineralization`, `belowground_litter_C_mineralization` (**Is this all we have?**)
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("litter_decomposition", "net_C_mineralization", "aboveground_litter_C_mineralization", "belowground_litter_C_mineralization"), "my_decomp", my_var ) )
+```
+
+
+- Net N mineralization: `potential_net_N_mineralization`, `net_N_mineralization`, `soil_N_mineralization` (**Check whether this is net or gross**)
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("potential_net_N_mineralization", "net_N_mineralization", "soil_N_mineralization"), "my_nmin", my_var ) )
+```
+
+
+- N losses: `soil_N2O_efflux`, `soil_N_efflux`, `15N_recovery` (**Look into this**), `N_leaching`, `NO3-_leaching`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("soil_N2O_efflux", "soil_N_efflux", "N_leaching", "NO3-_leaching"), "my_nloss", my_var ) )
+```
+
+- leaf N: `leaf_N`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("leaf_N"), "my_nleaf", my_var ) )
+```
+
+- Tissue C:N: `total_biomass_C:N`, `belowground_biomass_C:N`, `leaf_litter_N` (**OK here?**), `fine_root_N` (**OK here?**), `aboveground_biomass_C:N`, `leaf_litter_C:N`, `fine_root_C:N`, `wood_C/N`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("total_biomass_C:N", "belowground_biomass_C:N", "aboveground_biomass_C:N", "leaf_litter_C:N", "fine_root_C:N`", "wood_C/N"), "my_rcton", my_var ) )
+```
+
+Potentially interesting as well:
+
+- Resorption: `resorption_efficiency`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("resorption_efficiency"), "my_nresorp", my_var ) )
+```
+
+- Biomass: `biomass_C`, `total_biomass`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("biomass_C", "total_biomass"), "my_ctot", my_var ) )
+```
+
+- Aboveground biomass: `aboveground_biomass`, `Aboveground_biomass`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("aboveground_biomass", "Aboveground_biomass"), "my_caboveground", my_var ) )
+```
+
+- Mycorrhizal stuff: `mycorrhizal_colonization`, `mycorrhizal_root_colonization`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("mycorrhizal_colonization", "mycorrhizal_root_colonization"), "my_myc", my_var ) )
+```
+
+- Exudation: `DOC_exudation`, `exudation`, `Exudation`
+
+```{r, warning=FALSE}
+df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("DOC_exudation", "exudation", "Exudation"), "my_cexu", my_var ) )
+```
+
+
+# Data analysis
+
+As a first analysis, for all the experiments with manipulated CO2, we calculate the mean log-response ratio (`logr`) and the number of data points (`n_plots`), aggregated by variable (`Data_type`), experiment (`exp_nam`) and treatment (`treatment`).
+
+```{r, warning=FALSE}
+df_co2_agg <- df_co2 %>%                                  # only experiments with manipulated CO2
+  mutate( logr = log(elevated/ambient) ) %>%              # calculate log response ratio
+  group_by( exp_nam, my_var, treatment ) %>%              # prepare for aggregation
+  summarise( logr = mean(logr, na.rm=TRUE), n_plots = sum(n_plots) )   # This is a dumb mean, not taking into account the standard error and N. Warning also for na.rm = TRUE.
+```
+
+Plot aboveground biomass.
+```{r, warning=FALSE}
+library(ggplot2)
+df_co2_agg %>% filter(!is.na(my_var)) %>% 
+  ggplot( aes(x=my_var, y=logr)) +
+  geom_jitter( color = rgb(0,0,0,0.3), aes( size = n_plots ), position = position_jitter(w = 0.3, h = 0) ) +
+  geom_boxplot( outlier.shape=NA, fill = "grey80", alpha = 0.6, width = 0.5 ) +
+  coord_flip() +
+  ylim(-2,2)
+```
