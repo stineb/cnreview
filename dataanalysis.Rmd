@@ -91,6 +91,7 @@ library(tidyr)
 #  setNames( unique(df_co2$exp_nam) )
 
 df_avl_byexp <- df_co2 %>% 
+  mutate( n_plots = as.integer(n_plots) ) %>% 
   group_by( exp_nam ) %>% 
   nest() %>% 
   mutate( variables = purrr::map( data, ~unique( .$Data_type ) ),
@@ -149,6 +150,7 @@ Summarise data availability per variable (`Data_type`):
 library(knitr)
 # second way
 df_avl_byvar <- df_co2 %>% 
+  mutate( n_plots = as.integer(n_plots) ) %>% 
   group_by( Data_type ) %>% 
   nest() %>% 
   mutate( experiments = purrr::map( data, ~unique( .$exp_nam ) ) ) %>% 
@@ -270,7 +272,7 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
         tidyr::gather(level, sd, c(ambient_Sd, elevated_Sd)) %>%
         rowwise() %>% 
         mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
-      by = c(keyvar, "level") ) %>%
+      by = c(keyvars, "level") ) %>%
     
     ## gather 'se' based on columns: 'ambient_Se', 'elevated_Se'
     left_join( 
@@ -278,7 +280,7 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
         tidyr::gather(level, se, c(ambient_Se, elevated_Se)) %>%
         rowwise() %>% 
         mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
-      by = c(keyvar, "level") ) %>%
+      by = c(keyvars, "level") ) %>%
     
     ## magically add columns corresponding to all available levels of 'factors'
     `is.na<-`(factors_avl) %>% 
@@ -394,11 +396,12 @@ df_long_example %>%
 
 Let's apply this to the full data frame.
 ```{r}
-keyvars <- c("ALIAS", "exp_nam", "prev_name", "factors", "treatment", "TT_Nut_Detail", "Data_type", "Unit", "Sampling_date", "n_plots")
-valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
+keyvars <- c("ALIAS", "exp_nam", "factors", "Data_type", "Unit", "Sampling_date", "n_plots")
+valuevars <-  c("mean", "sd", "se")
 
 df_wide_c <- df_long %>% 
-  select(one_of(keyvars, valuevars)) %>%
+  # select(one_of(keyvars, valuevars, factors_avl)) %>%
+  select(-prev_name, -TT_Nut_Detail) %>% 
   long_to_wide_gcme("c") %>% 
   write_csv(path="~/data/gcme/data_received_190301/NewData_WIDE_c.csv")
 ```
@@ -420,8 +423,6 @@ df_wide_c <- df_long %>%
 <!-- ``` -->
 
 
-
-
 # Data selection
 
 The initial draft of the figures we want to draw looks like this:
@@ -435,87 +436,87 @@ The following is a list of variables we need according to this draft, and the co
 - Asat (light-saturated assimilation rate): `Anet` (**OK here?**), `Amax`, `Asat`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = NA ) %>% mutate( my_var = ifelse( Data_type %in% c("Amax", "Asat"), "my_asat", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = NA ) %>% mutate( my_var = ifelse( Data_type %in% c("Amax", "Asat"), "my_asat", my_var ) )
 ```
 
 - GPP: `GPP`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("GPP"), "my_gpp", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("GPP"), "my_gpp", my_var ) )
 ```
 
 - NPP: `NPP`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("NPP"), "my_npp", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("NPP"), "my_npp", my_var ) )
 ```
 
 - **Or:** ANPP: `ANPP`, `annual_aboveground_biomass_production`, `aboveground_production`, `annual_aboveground_biomass_production`, `aboveground_biomass_production`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("ANPP", "annual_aboveground_biomass_production", "aboveground_production", "annual_aboveground_biomass_production", "aboveground_biomass_production"), "my_anpp", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("ANPP", "annual_aboveground_biomass_production", "aboveground_production", "annual_aboveground_biomass_production", "aboveground_biomass_production"), "my_anpp", my_var ) )
 ```
 
 - N uptake: `N_uptake`, `NH4+_uptake` (**OK here?**), 
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("N_uptake", "NH4+_uptake"), "my_nup", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("N_uptake", "NH4+_uptake"), "my_nup", my_var ) )
 ```
 
 - N availability: `soil_NO3-`, `soil_NH4+`, `soil_NH4-N`, `soil_mineral_N`, `mineral_soil_N`, `resin_NH4+`, `resin_NO3-`. **What about organic N:** `soil_extractable_organic_N`, `soil_dissolved_organic_N`, `soil_DON`,
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("soil_NO3-", "soil_NH4+", "soil_NH4-N", "soil_mineral_N", "mineral_soil_N", "resin_NH4+", "resin_NO3-"), "my_navl", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("soil_NO3-", "soil_NH4+", "soil_NH4-N", "soil_mineral_N", "mineral_soil_N", "resin_NH4+", "resin_NO3-"), "my_navl", my_var ) )
 ```
 
 - N fixation: `number_of_nodes` **Only this data available?**
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("number_of_nodes"), "my_nfix", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("number_of_nodes"), "my_nfix", my_var ) )
 ```
 
 - Belowground C allocation: `root_biomass`, `root_biomass_(>2mm)`, `root_C`, `root_growth`, `root_mass`, `belowground_biomass`, `belowground_biomass_C`, `belowground_C`, `coarse_root_biomass` (**OK here?**), `fine_root_biomass`, `fine_root_production`, `BNPP`, `root_biomass_input`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("root_biomass", "root_biomass_(>2mm)", "root_C", "root_growth", "root_mass", "belowground_biomass", "belowground_biomass_C", "belowground_C", "coarse_root_biomass", "fine_root_biomass", "fine_root_production", "BNPP", "root_biomass_input"), "my_croot", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("root_biomass", "root_biomass_(>2mm)", "root_C", "root_growth", "root_mass", "belowground_biomass", "belowground_biomass_C", "belowground_C", "coarse_root_biomass", "fine_root_biomass", "fine_root_production", "BNPP", "root_biomass_input"), "my_croot", my_var ) )
 ```
 
 - Root:shoot ratio: `root-shoot_ratio`, `R/S` (**Is that what it means?**)
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("root-shoot_ratio", "R/S"), "my_rootshoot", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("root-shoot_ratio", "R/S"), "my_rootshoot", my_var ) )
 ```
 
 - SOM decomposition: `litter_decomposition` (**OK only if it's a relative rate**), `net_C_mineralization`, `aboveground_litter_C_mineralization`, `belowground_litter_C_mineralization` (**Is this all we have?**)
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("litter_decomposition", "net_C_mineralization", "aboveground_litter_C_mineralization", "belowground_litter_C_mineralization"), "my_decomp", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("litter_decomposition", "net_C_mineralization", "aboveground_litter_C_mineralization", "belowground_litter_C_mineralization"), "my_decomp", my_var ) )
 ```
 
 
 - Net N mineralization: `potential_net_N_mineralization`, `net_N_mineralization`, `soil_N_mineralization` (**Check whether this is net or gross**)
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("potential_net_N_mineralization", "net_N_mineralization", "soil_N_mineralization"), "my_nmin", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("potential_net_N_mineralization", "net_N_mineralization", "soil_N_mineralization"), "my_nmin", my_var ) )
 ```
 
 
 - N losses: `soil_N2O_efflux`, `soil_N_efflux`, `15N_recovery` (**Look into this**), `N_leaching`, `NO3-_leaching`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("soil_N2O_efflux", "soil_N_efflux", "N_leaching", "NO3-_leaching"), "my_nloss", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("soil_N2O_efflux", "soil_N_efflux", "N_leaching", "NO3-_leaching"), "my_nloss", my_var ) )
 ```
 
 - leaf N: `leaf_N`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("leaf_N"), "my_nleaf", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("leaf_N"), "my_nleaf", my_var ) )
 ```
 
 - Tissue C:N: `total_biomass_C:N`, `belowground_biomass_C:N`, `leaf_litter_N` (**OK here?**), `fine_root_N` (**OK here?**), `aboveground_biomass_C:N`, `leaf_litter_C:N`, `fine_root_C:N`, `wood_C/N`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("total_biomass_C:N", "belowground_biomass_C:N", "aboveground_biomass_C:N", "leaf_litter_C:N", "fine_root_C:N`", "wood_C/N"), "my_rcton", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("total_biomass_C:N", "belowground_biomass_C:N", "aboveground_biomass_C:N", "leaf_litter_C:N", "fine_root_C:N`", "wood_C/N"), "my_rcton", my_var ) )
 ```
 
 Potentially interesting as well:
@@ -523,35 +524,37 @@ Potentially interesting as well:
 - Resorption: `resorption_efficiency`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("resorption_efficiency"), "my_nresorp", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("resorption_efficiency"), "my_nresorp", my_var ) )
 ```
 
 - Biomass: `biomass_C`, `total_biomass`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("biomass_C", "total_biomass"), "my_ctot", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("biomass_C", "total_biomass"), "my_ctot", my_var ) )
 ```
 
 - Aboveground biomass: `aboveground_biomass`, `Aboveground_biomass`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("aboveground_biomass", "Aboveground_biomass"), "my_caboveground", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("aboveground_biomass", "Aboveground_biomass"), "my_caboveground", my_var ) )
 ```
 
 - Mycorrhizal stuff: `mycorrhizal_colonization`, `mycorrhizal_root_colonization`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("mycorrhizal_colonization", "mycorrhizal_root_colonization"), "my_myc", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("mycorrhizal_colonization", "mycorrhizal_root_colonization"), "my_myc", my_var ) )
 ```
 
 - Exudation: `DOC_exudation`, `exudation`, `Exudation`
 
 ```{r, warning=FALSE}
-df_co2 <- df_co2 %>% mutate( my_var = ifelse( Data_type %in% c("DOC_exudation", "exudation", "Exudation"), "my_cexu", my_var ) )
+df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("DOC_exudation", "exudation", "Exudation"), "my_cexu", my_var ) )
 ```
 
 
 # Data analysis
+
+## With old format
 
 As a first analysis, for all the experiments with manipulated CO2, we calculate the mean log-response ratio (`logr`) and the number of data points (`n_plots`), aggregated by variable (`Data_type`), experiment (`exp_nam`) and treatment (`treatment`).
 
@@ -566,6 +569,28 @@ Plot aboveground biomass.
 ```{r, warning=FALSE}
 library(ggplot2)
 df_co2_agg %>% filter(!is.na(my_var)) %>% 
+  ggplot( aes(x=my_var, y=logr)) +
+  geom_jitter( color = rgb(0,0,0,0.3), aes( size = n_plots ), position = position_jitter(w = 0.3, h = 0) ) +
+  geom_boxplot( outlier.shape=NA, fill = "grey80", alpha = 0.6, width = 0.5 ) +
+  coord_flip() +
+  ylim(-2,2)
+```
+
+## With new format
+
+As a first analysis, for all the experiments with manipulated CO2, we calculate the mean log-response ratio (`logr`) and the number of data points (`n_plots`), aggregated by variable (`Data_type`), experiment (`exp_nam`) and treatment (`treatment`).
+
+```{r, warning=FALSE}
+df_wide_c_agg <- df_wide_c %>%                            # only experiments with manipulated CO2
+  mutate( logr = log(elevated/ambient) ) %>%              # calculate log response ratio
+  group_by( exp_nam, my_var, f ) %>%              # prepare for aggregation
+  summarise( logr = mean(logr, na.rm=TRUE), n_plots = sum(n_plots) )   # This is a dumb mean, not taking into account the standard error and N. Warning also for na.rm = TRUE.
+```
+
+Plot aboveground biomass.
+```{r, warning=FALSE}
+library(ggplot2)
+df_wide_c_agg %>% filter(!is.na(my_var)) %>% 
   ggplot( aes(x=my_var, y=logr)) +
   geom_jitter( color = rgb(0,0,0,0.3), aes( size = n_plots ), position = position_jitter(w = 0.3, h = 0) ) +
   geom_boxplot( outlier.shape=NA, fill = "grey80", alpha = 0.6, width = 0.5 ) +
