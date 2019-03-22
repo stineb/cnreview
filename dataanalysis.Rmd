@@ -41,7 +41,7 @@ But before we start:
 Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
 ```{r, warning=FALSE}
 library(readr)
-df <- read_csv("~/data/gcme/data_received_190301/NewData_wide_CORRECTED.csv")
+df <- read_csv("/alphadata01/bstocker/data/gcme/data_received_190301/NewData_wide_CORRECTED.csv")
 ```
 
 
@@ -174,21 +174,113 @@ df_avl_byvar %>% select(Data_type) %>% slice(1:9) %>% print()
 ```
 
 
-<!-- ## 4. Long versus wide issue -->
+## 4. Long versus wide
 
-<!-- Let's look at data from just one experiment (`"SwissFACE_trifolium2"`): -->
-<!-- ```{r, warning=FALSE} -->
-<!-- df_co2 %>% filter(exp_nam == "SwissFACE_trifolium2") %>% print() -->
-<!-- ``` -->
+### The issue
 
-<!-- This data frame now has multiple rows, corresponding to different sampling dates. Some points here: -->
+Let's look at data from just one experiment (`"SwissFACE_trifolium2"`):
+```{r, warning=FALSE}
+df_co2 %>% filter(exp_nam == "SwissFACE_trifolium2") %>% print()
+```
 
-<!-- - The row Sampling_date is not very clean and cannot coerced into a date object (preferrable to be done with the R package lubridate). This is (almost) ok for now (we're just treating this as replicates, disregarding the information of the date), but needs to be addressed when using the data for model-data fusion (need to "sample" the model output at the same date). However ... -->
-<!-- - ... if we are to use 'experiment year since the start' as a factor in our analysis, this needs to be addressed. Either, we try to get the actual sampling date as a lubridate-ymd object (looks like "YY-MM-DD"), and have separate experiment meta information where the start year of the experiment is specified. Or, we just have a row in this data frame here, that specifies the experiment year (year=1 is the first year under treatment, year=0 is the last year of the pre-treatment period, or similar). -->
-<!-- - Units are $\mu$ mol? The respective character is not interpreted correctly. This is ok for now, as we are only looking only at response ratios. -->
-<!-- - In this example (site `"SwissFACE_trifolium2"`), I am confused about the information given in column `factors` (is `"cf"` for all rows displayed above). I interpret this as saying that this particular experiment was a 2-factorial experiment with a CO2 and fertilization treatment. However, the rows displayed here are only for the CO2-only treatment. Where are the remaining rows? -->
-<!-- - **Fundamental question:** In a multi-factorial experiment (let's stick with the example of `"SwissFACE_trifolium2"`), where one factor is CO2, and when trying to quantify the *CO2 effect*, we should use data both from the CO2-only and from the CO2xFertilization treatment and quantify *two* response ratios as c/control and cf/f. Do you agree? The way the data is structured now, it's not straight-forward to get these two response ratios as rows for the *cf* treatment use elevated as *cf*, and ambient as control, not *f*. Hence, the data first needs to be reshaped a bit... Probably best by converting it first to a long format. But let's solve the other points first. -->
+This data frame now has multiple rows, corresponding to different sampling dates. Some points here:
 
+- The row Sampling_date is not very clean and cannot coerced into a date object (preferrable to be done with the R package lubridate). This is (almost) ok for now (we're just treating this as replicates, disregarding the information of the date), but needs to be addressed when using the data for model-data fusion (need to "sample" the model output at the same date). However ...
+- ... if we are to use 'experiment year since the start' as a factor in our analysis, this needs to be addressed. Either, we try to get the actual sampling date as a lubridate-ymd object (looks like "YY-MM-DD"), and have separate experiment meta information where the start year of the experiment is specified. Or, we just have a row in this data frame here, that specifies the experiment year (year=1 is the first year under treatment, year=0 is the last year of the pre-treatment period, or similar).
+- Units are $\mu$ mol? The respective character is not interpreted correctly. This is ok for now, as we are only looking only at response ratios.
+- In this example (site `"SwissFACE_trifolium2"`), I am confused about the information given in column `factors` (is `"cf"` for all rows displayed above). I interpret this as saying that this particular experiment was a 2-factorial experiment with a CO2 and fertilization treatment. However, the rows displayed here are only for the CO2-only treatment. Where are the remaining rows?
+- **Fundamental question:** In a multi-factorial experiment (let's stick with the example of `"SwissFACE_trifolium2"`), where one factor is CO2, and when trying to quantify the *CO2 effect*, we should use data both from the CO2-only and from the CO2xFertilization treatment and quantify *two* response ratios as c/control and cf/f. Do you agree? The way the data is structured now, it's not straight-forward to get these two response ratios as rows for the *cf* treatment use elevated as *cf*, and ambient as control, not *f*. Hence, the data first needs to be reshaped a bit... Probably best by converting it first to a long format. But let's solve the other points first.
+
+### An example conversion
+
+How to perform a conversion of our current wide format to a long format? Let's do it for one example. An example for how the wide format is implemented in the current dataset:
+```{r}
+df_wide <- df %>% 
+  filter(exp_nam=="SwissFACE_lolium2") %>% 
+  select(exp_nam, factors, treatment) %>% 
+  distinct() %>%
+  mutate( ambient=rep("A", 3), elevated=c("B", "C", "D"),
+          ambient_Sd=rep("sdA", 3), elevated_Sd=c("sdB", "sdC", "sdD"),
+          ambient_Se=rep("seA", 3), elevated_Se=c("seB", "seC", "seD")) %>%
+  print()
+```
+
+To convert this to a long format, first get all available factors and create a vector. The available factors are:
+```{r}
+df %>% 
+  filter(!(factors %in% c("x","x99"))) %>% 
+  select(factors) %>% 
+  unique() %>% 
+  unlist() %>% 
+  unname() %>% 
+  print()
+```
+
+Create a vector with all single factors
+```{r}
+factors_avl <- df %>%
+  filter(!(factors %in% c("x","x99"))) %>%      # Something weird with this
+  select(factors) %>% 
+  unique() %>% 
+  mutate( factors_sep = strsplit(factors, NULL) ) %>% 
+  select(factors_sep) %>% 
+  unlist() %>% 
+  unname() %>% 
+  unique() %>% 
+  print()
+```
+
+Convert from wide to long, adding columns for all factors for which we have ambient and elevated levels' data.
+```{r}
+source("wide_to_long_gcme.R")
+  
+keyvars <- c("exp_nam", "factors", "treatment")
+valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
+
+df_long_example <- df_wide %>%
+  wide_to_long_gcme( keyvars ) %>%
+  print()
+```
+
+
+### Converting the entire table
+
+Let's apply this to the full data frame. First, keep only some of the columns:
+```{r}
+keyvars <- c("ALIAS", "exp_nam", "prev_name", "factors", "treatment", "TT_Nut_Detail", "Data_type", "Unit", "Sampling_date", "n_plots")
+valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
+
+df_long <- df %>% 
+  # slice(1:100) %>% 
+  select(one_of(keyvars, valuevars)) %>%
+  wide_to_long_gcme(keyvars) %>% 
+  write_csv(path="/alphadata01/bstocker/data/gcme/data_received_190301/NewData_LONG.csv")
+```
+
+Thus, we have a long-format data table, that has exactly twice as many rows as the original table:
+```{r}
+print(nrow(df)*2)
+nrow(df_long)
+```
+
+The column `ALIAS` has now always exactly two duplicates for each level. This allows us to identify which values were compared to each other (ambient and elevated) in the original data table. 
+
+### Converting back with a twist
+
+In the original data, `ambient` was the "absolute ambient". For example in the `cf` treatment, `ambient` was no treatment at all (control), and `elevated` was `c` $\times$ `f`. We may re-design a wide version of the table and allow flexibility in what treatments are compared to each other, i.e., what `ambient` means. I would argue that this depends whether we are interested in a *single* effect or in interactions. In our case, we are interested primarily in the CO2 effect. Hence, in a factorial experiment `cf`, we may want to compare `c` to `0` (an "absolute ambient"), and `cf` to `f` and thus have more data available to evaluate the CO2-only effect.
+
+Let's implement this, by converting our example back to a CO2-wide format:
+```{r}
+# take all data where factor 'c' is TRUE
+df_ec <- dplyr::filter(df_long_example, c) %>% 
+  
+  # call this 'elevated'
+  dplyr::rename("elevated"=mean) #, elevated_sd=sd, elevated_se=se
+  
+  # merge this with the corresponding row where all other factors are the same, while 'c' is FALSE
+
+df_wide_c <- 
+```
 
 <!-- ## 4. Number of replicates -->
 
