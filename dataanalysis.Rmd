@@ -41,7 +41,7 @@ But before we start:
 Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
 ```{r, warning=FALSE}
 library(readr)
-df <- read_csv("/alphadata01/bstocker/data/gcme/data_received_190301/NewData_wide_CORRECTED.csv")
+df <- read_csv("~/data/gcme/data_received_190301/NewData_wide_CORRECTED.csv")
 ```
 
 
@@ -232,8 +232,73 @@ factors_avl <- df %>%
 
 Convert from wide to long, adding columns for all factors for which we have ambient and elevated levels' data.
 ```{r}
-source("wide_to_long_gcme.R")
+wide_to_long_gcme <- function( df_wide, keyvars ){
   
+  require(stringr)
+  
+  ## if level is 'elevated', turn all factor levels that are part of 'treatment' to TRUE
+  switch_factor <- function(df){
+    if (df$level=="elevated"){
+      for (ifactor in strsplit(df$treatment, NULL) %>% unlist()){
+        df[[ifactor]] <- TRUE
+      }
+    }
+    return(df)
+  }
+  
+  ## First get available factors
+  factors_avl <- df_wide %>%
+    filter(!(factors %in% c("x","x99"))) %>%      # Something weird with this
+    select(factors) %>% 
+    unique() %>% 
+    mutate( factors_sep = strsplit(factors, NULL) ) %>% 
+    select(factors_sep) %>% 
+    unlist() %>% 
+    unname() %>% 
+    unique()  
+  
+  ## Make long and add columns for all available factors in the entire dataset, filling them all with FALSE
+  df_long <- df_wide %>% 
+    
+    ## gather 'mean' based on columns: 'ambient', 'elevated'
+    select( -ambient_Sd, -elevated_Sd, -ambient_Se, -elevated_Se ) %>%
+    tidyr::gather(level, mean, c(ambient, elevated)) %>%
+    
+    ## gather 'sd' based on columns: 'ambient_Sd', 'elevated_Sd'
+    left_join( 
+      select( df_wide, -ambient, -elevated, -ambient_Se, -elevated_Se ) %>%
+        tidyr::gather(level, sd, c(ambient_Sd, elevated_Sd)) %>%
+        rowwise() %>% 
+        mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
+      by = c(keyvars, "level") ) %>%
+    
+    ## gather 'se' based on columns: 'ambient_Se', 'elevated_Se'
+    left_join( 
+      select( df_wide, -ambient, -elevated, -ambient_Sd, -elevated_Sd ) %>%
+        tidyr::gather(level, se, c(ambient_Se, elevated_Se)) %>%
+        rowwise() %>% 
+        mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
+      by = c(keyvars, "level") ) %>%
+    
+    ## magically add columns corresponding to all available levels of 'factors'
+    `is.na<-`(factors_avl) %>% 
+    
+    ## fill all new factor columns with FALSE
+    dplyr::mutate_at( factors_avl, ~FALSE ) 
+  
+  ## Determine new factor columns based on information in 'treatment' and 'level'
+  df_long <- purrr::map_dfr(as.list(1:nrow(df_long)), ~switch_factor(df_long[.,])) %>% 
+    
+    ## abandon column 'treatment' - obsolete with column factors
+    select(-treatment) %>% 
+    
+    ## use only distinct columns (remember that the "absolute ambient" was a repeated entry in the wide table)
+    distinct()
+  
+  return(df_long)
+}
+
+# run it
 keyvars <- c("exp_nam", "factors", "treatment")
 valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
 
@@ -251,13 +316,12 @@ keyvars <- c("ALIAS", "exp_nam", "prev_name", "factors", "treatment", "TT_Nut_De
 valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
 
 df_long <- df %>% 
-  # slice(1:100) %>% 
   select(one_of(keyvars, valuevars)) %>%
   wide_to_long_gcme(keyvars) %>% 
-  write_csv(path="/alphadata01/bstocker/data/gcme/data_received_190301/NewData_LONG.csv")
+  write_csv(path="~/data/gcme/data_received_190301/NewData_LONG.csv")
 ```
 
-Thus, we have a long-format data table, that has exactly twice as many rows as the original table:
+Thus, we have a long-format data table, that less than twice as many rows as the original table, because the "absolute ambient" is no longer repeated:
 ```{r}
 print(nrow(df)*2)
 nrow(df_long)
@@ -271,15 +335,57 @@ In the original data, `ambient` was the "absolute ambient". For example in the `
 
 Let's implement this, by converting our example back to a CO2-wide format:
 ```{r}
-# take all data where factor 'c' is TRUE
-df_ec <- dplyr::filter(df_long_example, c) %>% 
-  
-  # call this 'elevated'
-  dplyr::rename("elevated"=mean) #, elevated_sd=sd, elevated_se=se
-  
-  # merge this with the corresponding row where all other factors are the same, while 'c' is FALSE
+long_to_wide_gcme <- function(df_long){
 
-df_wide_c <- 
+  joinvars <- names(df_long)[-which(names(df_long) %in% c("level", "mean", "sd", "se", "c"))]
+  factors_all <- df_long %>%
+    filter(!(factors %in% c("x","x99"))) %>%      # Something weird with this
+    select(factors) %>% 
+    unique() %>% 
+    mutate( factors_sep = strsplit(factors, NULL) ) %>% 
+    select(factors_sep) %>% 
+    unlist() %>% 
+    unname() %>% 
+    unique()
+  factorvars <- factors_all[-which(factors_all=="c")]
+    
+  # take all data where factor 'c' is TRUE
+  df_wide_c <- dplyr::filter(df_long, c) %>% 
+    
+    # call this 'elevated'
+    dplyr::rename(elevated=mean, elevated_sd=sd, elevated_se=se) %>% 
+    
+    # remove column 'c', is no longer used
+    dplyr::select(-c, -level) %>% 
+    
+    # merge this with the corresponding row where all other factors are the same, while 'c' is FALSE
+    left_join( 
+      
+      # take all data where factor 'c' is FALSE
+      dplyr::filter(df_long, !c) %>% 
+
+        # # remove 'ambients' where 'c' is not element of treatment - we don't need that 
+        # filter( !(!grepl("c", treatment) & level=="ambient") ) %>% 
+        
+        # call this 'ambient'
+        dplyr::rename(ambient=mean, ambient_sd=sd, ambient_se=se) %>% 
+
+        # remove column 'c', is no longer used
+        dplyr::select(-c, -level),
+      
+      ## merge by all other columns
+      by = joinvars ) %>% 
+    
+    # order columns
+    select( c(exp_nam, factors, factorvars, ambient, elevated, ambient_se, elevated_se, ambient_sd, elevated_sd)  )
+
+  return(df_wide_c)
+}
+
+# run it
+df_long_example %>%
+  long_to_wide_gcme() %>%
+  print()
 ```
 
 <!-- ## 4. Number of replicates -->
