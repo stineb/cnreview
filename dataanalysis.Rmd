@@ -35,13 +35,53 @@ But before we start:
 - Replaced lots of superscripted numbers (actually appeared as superscript when opening the CSV file in my text editor) with plain number (e.g., `m2`)
 - Replaced units given like `g_m-2` with `g/m2`, or `kg_ha-1` with `kg/ha`, or `g/m2*yr` with `g/m2/yr` (assuming that's correct if that's the way it would be entered in R), `_g/m2` with `g/m2`, `cm2/m2*d` with `cm2/m2/d`, ... I'll leave it with that for now.
 - Replaced `Vcmax_normalized_to_25°C` with `Vcmax25`, and `Jmax_normalized_to_25°C` with `Jmax25` (problematic degree sign)
+- Removed weird symbol in units, e.g., `‘mol_CO2/m2/s` to `mol_CO2/m2/s`
+- Removed line break in date string
 
-**All that is saved as a new file `NewData_wide_CORRECTED.csv`**
+**All that is saved as a new file `NewData_wide_CORRECTED2.csv`**
 
 Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
 ```{r, warning=FALSE}
 library(readr)
-df <- read_csv("~/data/gcme/data_received_190301/NewData_wide_CORRECTED.csv")
+library(dplyr)
+df <- read_csv("~/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
+  
+  # something is wrong in columns ambient_Sd, ambient_Se, elevated...
+  mutate( ambient_Sd  = as.numeric(ambient_Sd),  ambient_Se  = as.numeric(ambient_Se), 
+          elevated_Sd = as.numeric(elevated_Sd), elevated_Se = as.numeric(elevated_Se) )
+  
+  # XXX testing
+  # filter(exp_nam == "SwissFACE_lolium2" & Data_type == "aboveground_biomass")
+  # filter(exp_nam == "SwissFACE_trifolium2" & Data_type == "aboveground_biomass")
+```
+
+## 0. Issues
+
+Some rows are simply duplicates. This is dangerous.
+```{r}
+keyvars <- c("exp_nam", "factors", "treatment", "Data_type", "Unit", "Year", "n_plots")
+valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
+
+df %>% 
+  filter(exp_nam == "SwissFACE_trifolium2" & Data_type == "aboveground_biomass") %>% 
+  filter(treatment=="cf") %>% 
+  select(one_of(keyvars, valuevars)) %>% 
+  print()
+```
+
+This may be remediated automatically by using only columns that are distinct w.r.t. `valuevars` and `keyvars` (basically all columns in original data, except `ALIAS`).
+```{r}
+print(nrow(df))
+df <- df %>% 
+  distinct_at(vars(one_of(keyvars, valuevars))) %>% 
+  mutate( id=1:n() )   # create new ID key (before this was 'ALIAS')
+print(nrow(df))
+
+df %>% 
+  filter(exp_nam == "SwissFACE_trifolium2" & Data_type == "aboveground_biomass") %>% 
+  filter(treatment=="cf") %>% 
+  select(one_of(keyvars, valuevars)) %>% 
+  print()
 ```
 
 
@@ -70,6 +110,7 @@ df_co2 <- df %>% filter( grepl("c", treatment) )
 **Issue:**
 
 - Maybe it makes sense to exclude experiments where N was added. Does it?
+
 ```{r, warning=FALSE}
 df_co2 <- df_co2 %>% filter( !grepl("f", treatment) )
 ```
@@ -182,7 +223,7 @@ df_avl_byvar %>% select(Data_type) %>% slice(1:9) %>% print()
 
 Let's look at data from just one experiment (`"SwissFACE_trifolium2"`):
 ```{r, warning=FALSE}
-df_co2 %>% filter(exp_nam == "SwissFACE_trifolium2") %>% print()
+df_co2 %>% filter(exp_nam == "SwissFACE_lolium2") %>% print()
 ```
 
 This data frame now has multiple rows, corresponding to different sampling dates. Some points here:
@@ -198,10 +239,11 @@ This data frame now has multiple rows, corresponding to different sampling dates
 How to perform a conversion of our current wide format to a long format? Let's do it for one example. An example for how the wide format is implemented in the current dataset:
 ```{r}
 df_wide <- df %>% 
-  filter(exp_nam=="SwissFACE_lolium2") %>% 
-  select(exp_nam, factors, treatment) %>% 
+  filter(exp_nam=="SwissFACE_lolium2", Data_type=="aboveground_biomass") %>%
+  select(exp_nam, factors, treatment, Data_type) %>% 
   distinct() %>%
-  mutate( ambient=rep("A", 3), elevated=c("B", "C", "D"),
+  mutate( id=1:nrow(.),
+          ambient=rep("A", 3), elevated=c("B", "C", "D"),
           ambient_Sd=rep("sdA", 3), elevated_Sd=c("sdB", "sdC", "sdD"),
           ambient_Se=rep("seA", 3), elevated_Se=c("seB", "seC", "seD")) %>%
   print()
@@ -233,7 +275,7 @@ factors_avl <- df %>%
 ```
 
 Convert from wide to long, adding columns for all factors for which we have ambient and elevated levels' data.
-```{r}
+```{r warning=FALSE}
 wide_to_long_gcme <- function( df_wide, keyvars ){
   
   require(stringr)
@@ -258,9 +300,8 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
     unlist() %>% 
     unname() %>% 
     unique()  
-  
-  ## Make long and add columns for all available factors in the entire dataset, filling them all with FALSE
-  df_long <- df_wide %>% 
+
+  df_long <- df_wide %>%
     
     ## gather 'mean' based on columns: 'ambient', 'elevated'
     select( -ambient_Sd, -elevated_Sd, -ambient_Se, -elevated_Se ) %>%
@@ -270,18 +311,16 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
     left_join( 
       select( df_wide, -ambient, -elevated, -ambient_Se, -elevated_Se ) %>%
         tidyr::gather(level, sd, c(ambient_Sd, elevated_Sd)) %>%
-        rowwise() %>% 
-        mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
-      by = c(keyvars, "level") ) %>%
-    
+        mutate( level = stringr::str_split(.$level, "_") %>% purrr::map(., 1) %>% unlist() ),
+      by = c(keyvars) ) %>% 
+
     ## gather 'se' based on columns: 'ambient_Se', 'elevated_Se'
     left_join( 
       select( df_wide, -ambient, -elevated, -ambient_Sd, -elevated_Sd ) %>%
         tidyr::gather(level, se, c(ambient_Se, elevated_Se)) %>%
-        rowwise() %>% 
-        mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
-      by = c(keyvars, "level") ) %>%
-    
+        mutate( level = stringr::str_split(.$level, "_") %>% purrr::map(., 1) %>% unlist() ),
+      by = c(keyvars) ) %>% 
+
     ## magically add columns corresponding to all available levels of 'factors'
     `is.na<-`(factors_avl) %>% 
     
@@ -291,20 +330,21 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
   ## Determine new factor columns based on information in 'treatment' and 'level'
   df_long <- purrr::map_dfr(as.list(1:nrow(df_long)), ~switch_factor(df_long[.,])) %>% 
     
-    ## abandon column 'treatment' - obsolete with column factors
-    select(-treatment) %>% 
+    ## abandon columns, now obsolete with boolean columns for factors 
+    select(-treatment, -factors, -level, -id) %>%
     
-    ## use only distinct columns (remember that the "absolute ambient" was a repeated entry in the wide table)
+    # use only distinct columns (remember that the "absolute ambient" was a three-times repeated entry in the wide table)
     distinct()
   
   return(df_long)
 }
 
 # run it
-keyvars <- c("exp_nam", "factors", "treatment")
+keyvars <- c("id", "exp_nam", "factors", "treatment", "level", "Data_type")
 valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
 
 df_long_example <- df_wide %>%
+  select(one_of(keyvars, valuevars)) %>%
   wide_to_long_gcme( keyvars ) %>%
   print()
 ```
@@ -313,23 +353,92 @@ df_long_example <- df_wide %>%
 ### Converting the entire table
 
 Let's apply this to the full data frame. First, keep only some of the columns:
-```{r}
-keyvars <- c("ALIAS", "exp_nam", "prev_name", "factors", "treatment", "TT_Nut_Detail", "Data_type", "Unit", "Sampling_date", "n_plots")
+```{r warning=FALSE}
+keyvars <- c("id", "exp_nam", "factors", "treatment", "level", "Data_type", "Unit", "Year", "n_plots")
 valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
 
 df_long <- df %>% 
   select(one_of(keyvars, valuevars)) %>%
+  # filter(treatment=="f" & Year==5) %>%  # xxx debug
   wide_to_long_gcme(keyvars) %>% 
   write_csv(path="~/data/gcme/data_received_190301/NewData_LONG.csv")
 ```
 
 Thus, we have a long-format data table, that less than twice as many rows as the original table, because the "absolute ambient" is no longer repeated:
 ```{r}
-print(nrow(df)*2)
-nrow(df_long)
+# print(nrow(df)*2)
+# nrow(df_long)
 ```
 
 The column `ALIAS` has now always exactly two duplicates for each level. This allows us to identify which values were compared to each other (ambient and elevated) in the original data table. 
+
+#### Test
+
+Test, whether the conversion was doing alright.
+```{r}
+check_cf <- function(df_wide, df_long){
+
+  ## check cf experiments
+  df_cf <- df_wide %>% filter(treatment %in% c("f","c","cf","fc"))
+
+  out <- tibble()
+
+  all_exp <- df_cf$exp_nam %>% unique
+
+  for (iexp in all_exp){
+
+    df_sub <- df_cf %>% filter(exp_nam==iexp)
+
+    all_var <- df_sub$Data_type %>% unique
+
+    for (ivar in all_var){
+
+      df_subsub <- df_sub %>% filter(Data_type==ivar)
+
+      all_var_unit <- df_subsub$Unit %>% unique
+
+      for (iunit in all_var_unit){
+
+        df_subsubsub <- df_subsub %>% filter(Unit==iunit)
+
+        # elevated-f treatment
+        correct_f <- df_subsubsub %>% 
+          filter(treatment=="f") %>% 
+          # select(exp_nam, Data_type, Unit, Year, Sampling_date, n_plots, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
+          select(exp_nam, Data_type, Year, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
+          all_equal( ., df_long %>% filter(f & !c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, Year, mean, se, sd) )
+
+        # elevated-c treatment
+        correct_c <- df_subsubsub %>% 
+          filter(treatment=="c") %>% 
+          select(exp_nam, Data_type, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
+          all_equal( ., df_long %>% filter(!f & c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, mean, se, sd) )
+
+        # elevated-cf treatment
+        correct_cf <- df_subsubsub %>% 
+          filter(treatment=="cf") %>% 
+          select(exp_nam, Data_type, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
+          all_equal( ., df_long %>% filter(f & c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, mean, se, sd) )
+
+        # (absolute) control: WARNING: DUPLICATED ROWS, DIFFERING ONLY BY 'ALIAS'
+        correct_0 <- df_subsubsub %>% 
+          filter(treatment=="cf") %>% 
+          select(exp_nam, Data_type, Unit, Year, n_plots, mean=ambient, se=ambient_Se, sd=ambient_Sd) %>%
+          # select(exp_nam, Data_type, mean=ambient, se=ambient_Se, sd=ambient_Sd) %>%
+          all_equal( ., df_long %>% filter(!f & !c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, Unit, Year, n_plots, mean, se, sd) )
+
+        out <- bind_rows(out, c(factors="cf", exp_nam=iexp, Data_type=ivar, Unit=iunit, correct_0=correct_0, correct_c=correct_c, correct_f=correct_f, correct_cf=correct_cf))
+
+      }
+    }
+  }
+
+  return(out)
+}
+
+out <- check_cf( filter(df, exp_nam=="SwissFACE_lolium2"), df_long)
+```
+
 
 ### Converting back with a twist
 
@@ -395,7 +504,7 @@ df_long_example %>%
 ```
 
 Let's apply this to the full data frame.
-```{r}
+```{r eval=TRUE}
 keyvars <- c("ALIAS", "exp_nam", "factors", "Data_type", "Unit", "Sampling_date", "n_plots")
 valuevars <-  c("mean", "sd", "se")
 
@@ -554,34 +663,41 @@ df_wide_c <- df_wide_c %>% mutate( my_var = ifelse( Data_type %in% c("DOC_exudat
 
 # Data analysis
 
-## With old format
+<!-- ## With old format -->
 
-As a first analysis, for all the experiments with manipulated CO2, we calculate the mean log-response ratio (`logr`) and the number of data points (`n_plots`), aggregated by variable (`Data_type`), experiment (`exp_nam`) and treatment (`treatment`).
+<!-- As a first analysis, for all the experiments with manipulated CO2, we calculate the mean log-response ratio (`logr`) and the number of data points (`n_plots`), aggregated by variable (`Data_type`), experiment (`exp_nam`) and treatment (`treatment`). -->
 
-```{r, warning=FALSE}
-df_co2_agg <- df_co2 %>%                                  # only experiments with manipulated CO2
-  mutate( logr = log(elevated/ambient) ) %>%              # calculate log response ratio
-  group_by( exp_nam, my_var, treatment ) %>%              # prepare for aggregation
-  summarise( logr = mean(logr, na.rm=TRUE), n_plots = sum(n_plots) )   # This is a dumb mean, not taking into account the standard error and N. Warning also for na.rm = TRUE.
-```
+<!-- ```{r, warning=FALSE} -->
+<!-- df_co2_agg <- df_co2 %>%                                  # only experiments with manipulated CO2 -->
+<!--   mutate( logr = log(elevated/ambient) ) %>%              # calculate log response ratio -->
+<!--   group_by( exp_nam, my_var, treatment ) %>%              # prepare for aggregation -->
+<!--   summarise( logr = mean(logr, na.rm=TRUE), n_plots = sum(n_plots) )   # This is a dumb mean, not taking into account the standard error and N. Warning also for na.rm = TRUE. -->
+<!-- ``` -->
 
-Plot aboveground biomass.
-```{r, warning=FALSE}
-library(ggplot2)
-df_co2_agg %>% filter(!is.na(my_var)) %>% 
-  ggplot( aes(x=my_var, y=logr)) +
-  geom_jitter( color = rgb(0,0,0,0.3), aes( size = n_plots ), position = position_jitter(w = 0.3, h = 0) ) +
-  geom_boxplot( outlier.shape=NA, fill = "grey80", alpha = 0.6, width = 0.5 ) +
-  coord_flip() +
-  ylim(-2,2)
-```
+<!-- Plot aboveground biomass. -->
+<!-- ```{r, warning=FALSE} -->
+<!-- library(ggplot2) -->
+<!-- df_co2_agg %>% filter(!is.na(my_var)) %>%  -->
+<!--   ggplot( aes(x=my_var, y=logr)) + -->
+<!--   geom_jitter( color = rgb(0,0,0,0.3), aes( size = n_plots ), position = position_jitter(w = 0.3, h = 0) ) + -->
+<!--   geom_boxplot( outlier.shape=NA, fill = "grey80", alpha = 0.6, width = 0.5 ) + -->
+<!--   coord_flip() + -->
+<!--   ylim(-2,2) -->
+<!-- ``` -->
 
 ## With new format
 
 As a first analysis, for all the experiments with manipulated CO2, we calculate the mean log-response ratio (`logr`) and the number of data points (`n_plots`), aggregated by variable (`Data_type`), experiment (`exp_nam`) and treatment (`treatment`).
 
 ```{r, warning=FALSE}
-df_wide_c_agg <- df_wide_c %>%                            # only experiments with manipulated CO2
+df_wide_c_agg <- df_wide_c %>%                                             # only experiments with manipulated CO2
+  mutate( my_ambient_sd = ambient_sd, my_elevated_sd = elevated_sd ) %>%   # get standard deviation for all data
+  rowwise() %>% 
+  mutate( my_ambient_sd   = ifelse( is.na(my_ambient_sd),  ambient_se  * sqrt(n_plots), my_ambient_sd ),
+          my_elevated_sd  = ifelse( is.na(my_elevated_sd), elevated_se * sqrt(n_plots), my_elevated_sd ))
+  
+  mutate( my_ambient_sd  = ifelse( is.na(my_ambient_sd),  ambient_se  * sqrt(n_plots), ambient_sd ),        # SD = SE * sqrt(N)
+          my_elevated_sd = ifelse( is.na(my_elevated_sd), elevated_se * sqrt(n_plots), elevated_sd) ) %>%   # SD = SE * sqrt(N)
   mutate( logr = log(elevated/ambient) ) %>%              # calculate log response ratio
   group_by( exp_nam, my_var, f ) %>%              # prepare for aggregation
   summarise( logr = mean(logr, na.rm=TRUE), n_plots = sum(n_plots) )   # This is a dumb mean, not taking into account the standard error and N. Warning also for na.rm = TRUE.

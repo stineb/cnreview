@@ -22,9 +22,8 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
     unlist() %>% 
     unname() %>% 
     unique()  
-  
-  ## Make long and add columns for all available factors in the entire dataset, filling them all with FALSE
-  df_long <- df_wide %>% 
+
+  df_long <- df_wide %>%
     
     ## gather 'mean' based on columns: 'ambient', 'elevated'
     select( -ambient_Sd, -elevated_Sd, -ambient_Se, -elevated_Se ) %>%
@@ -34,18 +33,16 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
     left_join( 
       select( df_wide, -ambient, -elevated, -ambient_Se, -elevated_Se ) %>%
         tidyr::gather(level, sd, c(ambient_Sd, elevated_Sd)) %>%
-        rowwise() %>% 
-        mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
-      by = c(keyvars, "level") ) %>%
-    
+        mutate( level = stringr::str_split(.$level, "_") %>% purrr::map(., 1) %>% unlist() ),
+      by = c(keyvars) ) %>% 
+
     ## gather 'se' based on columns: 'ambient_Se', 'elevated_Se'
     left_join( 
       select( df_wide, -ambient, -elevated, -ambient_Sd, -elevated_Sd ) %>%
         tidyr::gather(level, se, c(ambient_Se, elevated_Se)) %>%
-        rowwise() %>% 
-        mutate( level = (stringr::str_split(level, "_") %>% unlist())[1] ),
-      by = c(keyvars, "level") ) %>%
-    
+        mutate( level = stringr::str_split(.$level, "_") %>% purrr::map(., 1) %>% unlist() ),
+      by = c(keyvars) ) %>% 
+
     ## magically add columns corresponding to all available levels of 'factors'
     `is.na<-`(factors_avl) %>% 
     
@@ -55,10 +52,10 @@ wide_to_long_gcme <- function( df_wide, keyvars ){
   ## Determine new factor columns based on information in 'treatment' and 'level'
   df_long <- purrr::map_dfr(as.list(1:nrow(df_long)), ~switch_factor(df_long[.,])) %>% 
     
-    ## abandon column 'treatment' - obsolete with column factors
-    select(-treatment) %>% 
+    ## abandon columns, now obsolete with boolean columns for factors 
+    select(-treatment, -factors, -level, -id) %>%
     
-    ## use only distinct columns (remember that the "absolute ambient" was a repeated entry in the wide table)
+    # use only distinct columns (remember that the "absolute ambient" was a three-times repeated entry in the wide table)
     distinct()
   
   return(df_long)
