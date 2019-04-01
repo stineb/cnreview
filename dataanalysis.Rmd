@@ -44,7 +44,7 @@ Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
 ```{r, warning=FALSE}
 library(readr)
 library(dplyr)
-df <- read_csv("~/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
+df <- read_csv("/alphadata01/bstocker/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
   
   # something is wrong in columns ambient_Sd, ambient_Se, elevated...
   mutate( ambient_Sd  = as.numeric(ambient_Sd),  ambient_Se  = as.numeric(ambient_Se), 
@@ -405,7 +405,7 @@ df_long <- df %>%
   select(one_of(keyvars, valuevars)) %>%
   # filter(exp_nam=="BioCON" & Data_type=="leaf_N" & Year==4) %>%  # xxx debug
   wide_to_long_gcme(keyvars) %>% 
-  write_csv(path="~/data/gcme/data_received_190325/NewData_LONG.csv")
+  write_csv(path="/alphadata01/bstocker/data/gcme/data_received_190325/NewData_LONG.csv")
 ```
 
 Thus, we have a long-format data table, that has *less* than twice as many rows as the original table, because the "absolute ambient" is no longer repeated:
@@ -584,7 +584,7 @@ df_wide_c <- df_long %>%
   # select(one_of(keyvars, valuevars, factors_avl)) %>%
   # select(-prev_name, -TT_Nut_Detail) %>% 
   long_to_wide_gcme("c") %>% 
-  write_csv(path="~/data/gcme/data_received_190325/NewData_WIDE_c.csv")
+  write_csv(path="/alphadata01/bstocker/data/gcme/data_received_190325/NewData_WIDE_c.csv")
 ```
 
 **TODO:**
@@ -625,7 +625,7 @@ ANPP: `my_varnam = my_anpp`, and `varnam %in% c("anpp", "anpp_bm")`.
 
 Collect information about experiments providing data for any of `c("anpp", "anpp_bm")`. Use file `table_var_exp_names_anpp.csv` and manually add a new row `varnam` there, translating available variable names (`Data_type`) into new, unified variable names. Add additional information from the experiments table (`table_var_exp_names_experiments.csv`) and from the data frame `df_experiments`, which is used to associate new and old experiments names.
 ```{r, warning=FALSE}
-df_anpp <- read_csv("~/data/gcme/data_received_190325/table_var_exp_names_anpp.csv") %>% 
+df_anpp <- read_csv("/alphadata01/bstocker/data/gcme/data_received_190325/table_var_exp_names_anpp.csv") %>% 
   select(prev_name=expnam, varnam, Data_type, Source_Reference) %>%
   distinct() %>% 
   filter(varnam %in% c("anpp", "anpp_bm")) %>% 
@@ -635,7 +635,7 @@ df_anpp <- read_csv("~/data/gcme/data_received_190325/table_var_exp_names_anpp.c
   
   ## add experiments meta information from experiments table
   left_join( 
-    read_csv("~/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
+    read_csv("/alphadata01/bstocker/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
       select(prev_name, Fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks),
     by = c("prev_name")
     )
