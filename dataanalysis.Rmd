@@ -44,7 +44,7 @@ Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
 ```{r, warning=FALSE}
 library(readr)
 library(dplyr)
-df <- read_csv("/alphadata01/bstocker/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
+df <- read_csv("~/Dropbox/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
   
   # something is wrong in columns ambient_Sd, ambient_Se, elevated...
   mutate( ambient_Sd  = as.numeric(ambient_Sd),  ambient_Se  = as.numeric(ambient_Se), 
@@ -405,7 +405,7 @@ df_long <- df %>%
   select(one_of(keyvars, valuevars)) %>%
   # filter(exp_nam=="BioCON" & Data_type=="leaf_N" & Year==4) %>%  # xxx debug
   wide_to_long_gcme(keyvars) %>% 
-  write_csv(path="/alphadata01/bstocker/data/gcme/data_received_190325/NewData_LONG.csv")
+  write_csv(path="~/Dropbox/data/gcme/data_received_190325/NewData_LONG.csv")
 ```
 
 Thus, we have a long-format data table, that has *less* than twice as many rows as the original table, because the "absolute ambient" is no longer repeated:
@@ -584,7 +584,7 @@ df_wide_c <- df_long %>%
   # select(one_of(keyvars, valuevars, factors_avl)) %>%
   # select(-prev_name, -TT_Nut_Detail) %>% 
   long_to_wide_gcme("c") %>% 
-  write_csv(path="/alphadata01/bstocker/data/gcme/data_received_190325/NewData_WIDE_c.csv")
+  write_csv(path="~/Dropbox/data/gcme/data_received_190325/created/NewData_WIDE_c.csv")
 ```
 
 **TODO:**
@@ -618,6 +618,52 @@ The following is a list of variables we need according to this draft, and the co
 
 Add two columns to the data. One for the new standard variable name (`varnam`), taken from CSV files. And one for this specific study where multiple variables (based on `varnames`) are pooled because they contain relevant and comparable information when evaluating response ratios (named `my_varnam`).
 
+## General filters
+
+We filter the data based on the following criteria:
+
+- Only data from experiments is used where CO2 was the only manipulated factor (data from `treatment = "c"`)
+- Only data from experiments where data from at least two years is available, based on column `Year` in the data table.
+- Only data from Open Top Chambers or Free Air CO2 Enrichment CO2 experiments: fumigation type is either `"OTC"` or `"FACE"`. 
+
+```{r warning=FALSE}
+## Determine all experiments that have more than 1 year data
+list_exp_gt1yr <- df %>% 
+  filter(!is.na(Year)) %>% 
+  group_by(exp_nam) %>% 
+  summarise(nyears=max(Year)) %>% 
+  filter(nyears>1) %>% 
+  select(exp_nam) %>% 
+  unlist() %>% 
+  unname()
+
+df_c <- df %>%
+  
+  # ## Take this info from experiments below
+  # select(-Fumigation_type, -Vegetation_type) %>% 
+  
+  ## Add prev_name back
+  left_join( df_experiments, by = "exp_nam") %>% 
+  
+  ## filter experiments with only manipulated CO2
+  ## (no other factors manipulated, strong reduction of data)
+  filter(treatment=="c") %>% 
+  
+  ## More than 1 year data
+  filter(exp_nam %in% list_exp_gt1yr) %>% 
+  
+  ## Combine with experiments meta info
+  left_join( 
+    read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
+      select(prev_name, Fumigation_type=my_fumigation_type, Vegetation_type),
+    by = c("prev_name")
+  ) %>% 
+  
+  ## Filter only Fumigation_type OTC or FACE
+  filter( Fumigation_type %in% c("OTC", "FACE") )
+```
+
+# Data analysis 
 
 ## ANPP
 
@@ -625,25 +671,28 @@ ANPP: `my_varnam = my_anpp`, and `varnam %in% c("anpp", "anpp_bm")`.
 
 Collect information about experiments providing data for any of `varnam %in% c("anpp", "anpp_bm")`. See procedure [here](https://docs.google.com/document/d/11ghws59q6Ts6j6GK6yNqQBvilrNojRN_aC7c41-LrI0/edit?usp=sharing). Add additional information from the experiments table (`table_var_exp_names_experiments.csv`) and from the data frame `df_experiments`, which is used to associate new and old experiments names.
 ```{r, warning=FALSE}
-df_anpp <- read_csv("/alphadata01/bstocker/data/gcme/data_received_190325/table_var_exp_names_anpp.csv") %>% 
+df_anpp <- read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_anpp.csv") %>% 
   select(prev_name=expnam, varnam, Data_type, Source_Reference) %>%
   distinct() %>% 
-  filter(varnam %in% c("anpp", "anpp_bm")) %>% 
+  filter(varnam %in% c("anpp", "anpp_bm") ) %>% 
   
   ## add 'exp_nam' (new experiment name) from data table
   left_join( df_experiments, by="prev_name" ) %>% 
   
+  ## filter only experiments selected by general filters above
+  filter( exp_nam %in% unique(df_c$exp_nam) ) %>% 
+  
   ## add experiments meta information from experiments table
   left_join( 
-    read_csv("/alphadata01/bstocker/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
-      select(prev_name, Fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks),
+    read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
+      select(prev_name, Fumigation_type=my_fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks),
     by = c("prev_name")
     )
 ```
 
 Add `my_varnam` to the data table, defined by `my_varnam = ifelse( varnam %in% c("anpp", "anpp_bm"), "my_anpp", my_varnam )`. WARNING: This assumes that variable names 'Data_type' are identical in old and new dataset (manually replaced white spaces with underscores in table_var_exp_names_anpp.csv, first)
 ```{r, warning=FALSE}
-df <- df %>% 
+df_c <- df_c %>% 
   mutate( varnam=NA ) %>% 
   left_join( select( df_anpp, -prev_name ), by=c("exp_nam", "Data_type") ) %>% 
   distinct(id, .keep_all=TRUE) %>% 
@@ -659,65 +708,58 @@ Test analysis and plot of ANPP data. Calculate the response ratio of ANPP (mean 
 $$
 SD = SE \sqrt{N}
 $$
-Then, the pooled means are:
-$$
-\mu = \frac{ \sum_i N_i \mu_i }{\sum_i N_i}
-$$
-and standard deviations:
-$$
-\sigma = \sqrt{ \frac{\sum_i (N_i-1)\sigma_i^2}{\sum_i (N_i-1)} }
-$$
-
-**QUESTION TO CESAR:**
-
-- Is there no component in $\sigma$ that accounts for the variance between the sample means?
 
 Now, do the meta-analysis and plot results.
 ```{r, warning=FALSE}
 library(metafor)   # see ?dat.curtis1998 for an example with CO2 manipulation data
-mean_pooled <- function( x, n ){
-  sum(x * n)/sum(n)
-}
-sd_pooled <- function( sd, n ){
-  sqrt( sum( (n-1)*sd^2 ) / sum(n-1) )
-}
-
 ## aggregate by variable and experiment, pooling multiple years, sampling dates, and plots/replicates and calculate log response ratio
-df_c_anpp_agg <- df %>%                                         
-  filter(treatment=="c") %>%   # filter experiments with only manipulated CO2 (no other factors manipulated, strong reduction of data)
+df_c_anpp <- df_c %>%         
+  
+  ## Here only for ANPP
   filter(my_varnam=="my_anpp") %>% 
-  mutate( my_ambient_sd = ambient_Sd, my_elevated_sd = elevated_Sd ) %>%   # get standard deviation for all data
+  
+  # get standard deviation for all data
+  mutate( my_ambient_sd = ambient_Sd, my_elevated_sd = elevated_Sd ) %>%
   rowwise() %>% 
   mutate( my_ambient_sd   = ifelse( is.na(my_ambient_sd),  ambient_Se  * sqrt(n_plots), my_ambient_sd ),
           my_elevated_sd  = ifelse( is.na(my_elevated_sd), elevated_Se * sqrt(n_plots), my_elevated_sd )) %>%
 
-  ## pool all measurements (multiple years, sampling dates and plots) by variable and experiment for meta analysis
-  group_by( exp_nam, treatment, my_varnam ) %>%                        # prepare for aggregation
-  summarise( ambient     = mean_pooled( ambient, n_plots ), 
-             elevated    = mean_pooled( elevated, n_plots ),
-             ambient_sd  = sd_pooled( my_ambient_sd, n_plots ),
-             elevated_sd = sd_pooled( my_elevated_sd, n_plots ),
-             n_plots = sum(n_plots) ) %>% 
-
   ## Get logarithm of response ratio and its variance
   metafor::escalc( 
     measure = "ROM", 
-    m1i = elevated, sd1i = elevated_sd, n1i = n_plots, 
-    m2i = ambient,  sd2i = ambient_sd,  n2i = n_plots, 
+    m1i = elevated, sd1i = my_elevated_sd, n1i = n_plots, 
+    m2i = ambient,  sd2i = my_ambient_sd,  n2i = n_plots, 
     data=., 
     append = TRUE, var.names = c("logr", "logr_var") ) %>% 
   as_tibble() %>% 
   mutate( logr_se = sqrt(logr_var)/sqrt(n_plots) )
 
+## pool all measurements (multiple years, sampling dates and plots) by variable and experiment for meta analysis
+df_c_anpp_agg <- df_c_anpp %>% 
+  filter(!is.na(logr_var) & !is.na(logr)) %>% 
+  select(-id) %>% # this is necessary because the dumb function agg() uses my 'id' otherwise
+  MAd::agg( id = exp_nam, es = logr, var = logr_var, n.1 = n_plots, n.2 = n_plots, cor = 1.0, method = "BHHR", data = . ) %>% 
+  rename( exp_nam = id ) %>% 
+  
+  ## add number of plots column and my_varnam
+  left_join( df_c_anpp %>% 
+               group_by( exp_nam ) %>%
+               summarise( n_plots = sum(n_plots) ) %>% 
+               select( exp_nam, n_plots ),
+             by = "exp_nam" ) %>% 
+  rename( logr = es, logr_var = var ) %>% 
+  mutate( logr_se = sqrt(logr_var)/sqrt(n_plots),
+          my_varnam = "my_anpp" )
+
 ## aggregate by variable, doing a meta-analysis of the log response ratios, with experiment as random factor (method="DL")
 agg_meta <- function(df, groupvar){
   out_meta <- df %>% dplyr::filter(my_varnam==eval(parse_character(groupvar))) %>% 
-    metafor::rma( logr, logr_var, method = "DL", data = . )
+    metafor::rma( logr, logr_var, method = "REML", slab = exp_nam, data = . )
   
   # transform back
   out_meta_scaled <- predict( out_meta, transf=exp )
   
-  tibble(
+  df_box <- tibble(
     my_varnam=groupvar, 
     middle = out_meta$b[1,1], 
     ymin   = out_meta$ci.lb, 
@@ -727,19 +769,25 @@ agg_meta <- function(df, groupvar){
     ymin_scaled   = out_meta_scaled$ci.lb, 
     ymax_scaled   = out_meta_scaled$ci.ub
   )
+  return(list(df_box=df_box, out_meta=out_meta))
 }
 
-# do meta-analysis all variables
-df_meta <- purrr::map_dfr(as.list(unique(df_c_anpp_agg$my_varnam)), ~agg_meta(df_c_anpp_agg, .))
+# do meta-analysis on all variables
+list_meta  <- purrr::map(as.list(unique(df_c_anpp_agg$my_varnam)), ~agg_meta(df_c_anpp_agg, .))
+df_metabox <- purrr::map_dfr(list_meta, "df_box")
 
-# Plot
+# Plot dots and my box
 library(ggplot2)
 df_c_anpp_agg %>%
   ggplot( aes(x=my_varnam, y=logr)) +
   geom_jitter( color = rgb(0,0,0,0.3), aes( size = 1/logr_se ), position = position_jitter(w = 0.2, h = 0) ) +
-  geom_crossbar( data = df_meta, aes(x=my_varnam, y=middle, ymin=ymin, ymax=ymax), fill = "grey80", alpha = 0.6, width = 0.5 ) +
+  geom_crossbar( data = df_metabox, aes(x=my_varnam, y=middle, ymin=ymin, ymax=ymax), fill = "grey80", alpha = 0.6, width = 0.5 ) +
   coord_flip() +
   ylim(-1,1)
+
+# Forest plot
+par(mar=c(4,4,1,2))
+out_forest <- metafor::forest(list_meta[[1]]$out_meta, xlab="Log Response Ratio", mlab="", xlim=c(-1,1), cex=0.5)
 ```
 
 This shows the log-response ratio of ANPP, each dot for one experiment, multiple years, sampling dates, and plots pooled. The size of the dots represents the standard error of the response ratio (the smaller, the bigger). The box represents the meta-analysis mean and confidence interval of the log response ratio.
@@ -747,101 +795,131 @@ This shows the log-response ratio of ANPP, each dot for one experiment, multiple
 
 And some information about the data used for `my_anpp` (only top 5 rows of a total of 110 available rows, full table at the bottom of this document)
 ```{r}
-df_anpp %>% select(-prev_name, -Cquantity_Control) %>% distinct(varnam, Data_type, exp_nam, .keep_all=TRUE) %>% slice(1:5) %>% knitr::kable()
+df_anpp %>% 
+  select(-prev_name, -Cquantity_Control) %>% 
+  distinct(varnam, Data_type, exp_nam, .keep_all=TRUE) %>% 
+  mutate( Source_Reference = str_replace_all(Source_Reference, "_", " ") ) %>% 
+  knitr::kable()
 ```
 
 
-**Issue:**
+<!-- **Issue:** -->
 
-- There are un-interpretable characters in files, concerning (most problematically) the experiments names. The problem is now, that these are in all data that is read in from multiple CSVs. Changing this by hand has to make sure that they are changed the same way in multiple files.
-- Some old experiment names could not be associated with new experiments name because the old names given in the Excel table (sent 25.2.19) are not detected in the new data table (sent 25.3.19). This old-new name association is based on the columns `exp_nam` and `prev_name` in the new data table. For the following old experiment names, no new names could be found:
-```{r}
-df_anpp %>% filter(is.na(exp_nam)) %>% select(prev_name) %>% distinct() %>% unlist() %>% unname() %>% print()
-```
-- The CO2 treatment levels are quite diverse. We should normalise the response ratio to that. How?
+<!-- - There are un-interpretable characters in files, concerning (most problematically) the experiments names. The problem is now, that these are in all data that is read in from multiple CSVs. Changing this by hand has to make sure that they are changed the same way in multiple files. -->
+<!-- - Some old experiment names could not be associated with new experiments name because the old names given in the Excel table (sent 25.2.19) are not detected in the new data table (sent 25.3.19). This old-new name association is based on the columns `exp_nam` and `prev_name` in the new data table. For the following old experiment names, no new names could be found: -->
+<!-- ```{r} -->
+<!-- df_anpp %>% filter(is.na(exp_nam)) %>% select(prev_name) %>% distinct() %>% unlist() %>% unname() %>% print() -->
+<!-- ``` -->
+<!-- - The CO2 treatment levels are quite diverse. We should normalise the response ratio to that. How? -->
 
 
-## Leaf N 
+## Leaf N
 
 This analysis is done by mass, area, and C:N separately.
 
-- `my_varnam = my_nmass_leaf`, and `varnam == "nmass_leaf"`.
-- `my_varnam = my_narea_leaf`, and `varnam == "narea_leaf"`.
-- `my_varnam = my_rcton_leaf`, and `varnam == "rcton_leaf"`.
+- `my_varnam = "my_nmass_leaf"`, and `varnam = "nmass_leaf"`.
+- `my_varnam = "my_narea_leaf"`, and `varnam = "narea_leaf"`.
+- `my_varnam = "my_rcton_leaf"`, and `varnam = "rcton_leaf"`.
 
-Collect information about experiments providing data for any of `varnam %in% c("anpp", "anpp_bm")`. See procedure [here](https://docs.google.com/document/d/11ghws59q6Ts6j6GK6yNqQBvilrNojRN_aC7c41-LrI0/edit?usp=sharing). Add additional information from the experiments table (`table_var_exp_names_experiments.csv`) and from the data frame `df_experiments`, which is used to associate new and old experiments names.
+Collect information about experiments providing data for any of `varnam %in% c("nmass_leaf", "narea_leaf", "rcton_leaf")` from file `"table_var_exp_names_leafn.csv"`. See procedure [here](https://docs.google.com/document/d/11ghws59q6Ts6j6GK6yNqQBvilrNojRN_aC7c41-LrI0/edit?usp=sharing). Add additional information from the experiments table (`table_var_exp_names_experiments.csv`) and from the data frame `df_experiments`, which is used to associate new and old experiments names.
 ```{r, warning=FALSE}
-df_leafn <- read_csv("~/data/gcme/data_received_190325/table_var_exp_names_leafn.csv") %>% 
+df_leafn <- read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_leafn.csv") %>%
   select(prev_name=expnam, varnam, Data_type, Source_Reference) %>%
-  distinct() %>% 
-  filter(varnam == "nmass_leaf") %>% 
-  
+  distinct() %>%
+  filter(varnam %in% c("nmass_leaf", "narea_leaf", "rcton_leaf")) %>%
+
   ## add 'exp_nam' (new experiment name) from data table
-  left_join( df_experiments, by="prev_name" ) %>% 
-  
+  left_join( df_experiments, by="prev_name" ) %>%
+
   ## add experiments meta information from experiments table
-  left_join( 
-    read_csv("~/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
-      select(prev_name, Fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks),
+  left_join(
+    read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>%
+      select(prev_name, Fumigation_type=my_fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks),
     by = c("prev_name")
     )
+
+# df_leafn <- read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_leafn.csv") %>% 
+#   select(prev_name=expnam, varnam, Data_type, Source_Reference) %>%
+#   distinct() %>% 
+#   filter(varnam %in% c("nmass_leaf", "narea_leaf", "rcton_leaf") ) %>% 
+  
+#   ## add 'exp_nam' (new experiment name) from data table
+#   left_join( df_experiments, by="prev_name" ) %>% 
+  
+#   ## filter only experiments selected by general filters above
+#   filter( exp_nam %in% unique(df_c$exp_nam) ) %>% 
+  
+#   ## add experiments meta information from experiments table
+#   left_join( 
+#     read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>% 
+#       select(prev_name, Fumigation_type=my_fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks),
+#     by = c("prev_name")
+#     )
+  
 ```
 
 Add `my_varnam` to the data table, defined by `my_varnam = ifelse( varnam == "nmass_leaf", "my_nmass_leaf", my_varnam )`.
 ```{r, warning=FALSE}
-df_right <- select( df_leafn, exp_nam, Data_type, varnam_unified=varnam )
-df <- df %>% 
-  left_join( select( df_leafn, exp_nam, Data_type, varnam_unified=varnam ), by=c("exp_nam", "Data_type") ) %>% 
-  mutate( varnam = ifelse( is.na(varnam), varnam_unified, varnam ) ) %>% 
-  mutate( my_varnam = ifelse( varnam == "nmass_leaf", "my_nmass_leaf", my_varnam ) ) %>% 
+df_c <- df_c %>%
+  left_join( select( df_leafn, exp_nam, Data_type, varnam_unified=varnam ), by=c("exp_nam", "Data_type") ) %>%
+  mutate( varnam = ifelse( is.na(varnam), varnam_unified, varnam ) ) %>%
+  mutate( my_varnam = ifelse( varnam == "nmass_leaf", "my_nmass_leaf", my_varnam ),
+          my_varnam = ifelse( varnam == "narea_leaf", "my_narea_leaf", my_varnam ),
+          my_varnam = ifelse( varnam == "rcton_leaf", "my_rcton_leaf", my_varnam )) %>%
   select(-varnam_unified)
 ```
 
 Now, do the meta-analysis and plot results.
 ```{r, warning=FALSE}
+mean_pooled <- function( x, n ){
+  sum(x * n)/sum(n)
+}
+sd_pooled <- function( sd, n ){
+  sqrt( sum( (n-1)*sd^2 ) / sum(n-1) )
+}
+
 ## aggregate by variable and experiment, pooling multiple years, sampling dates, and plots/replicates and calculate log response ratio
-df_c_leafn_agg <- df %>%                                         
-  filter(treatment=="c") %>%   # filter experiments with only manipulated CO2 (no other factors manipulated, strong reduction of data)
-  filter(my_varnam=="my_nmass_leaf") %>% 
+df_c_leafn_agg <- df_c %>%
+  filter( my_varnam %in% c("my_nmass_leaf", "my_narea_leaf", "my_rcton_leaf") ) %>%
   mutate( my_ambient_sd = ambient_Sd, my_elevated_sd = elevated_Sd ) %>%   # get standard deviation for all data
-  rowwise() %>% 
+  rowwise() %>%
   mutate( my_ambient_sd   = ifelse( is.na(my_ambient_sd),  ambient_Se  * sqrt(n_plots), my_ambient_sd ),
           my_elevated_sd  = ifelse( is.na(my_elevated_sd), elevated_Se * sqrt(n_plots), my_elevated_sd )) %>%
 
   ## pool all measurements (multiple years, sampling dates and plots) by variable and experiment for meta analysis
   group_by( exp_nam, treatment, my_varnam ) %>%                        # prepare for aggregation
-  summarise( ambient     = mean_pooled( ambient, n_plots ), 
+  summarise( ambient     = mean_pooled( ambient, n_plots ),
              elevated    = mean_pooled( elevated, n_plots ),
              ambient_sd  = sd_pooled( my_ambient_sd, n_plots ),
              elevated_sd = sd_pooled( my_elevated_sd, n_plots ),
-             n_plots = sum(n_plots) ) %>% 
+             n_plots = sum(n_plots) ) %>%
 
   ## Get logarithm of response ratio and its variance
-  metafor::escalc( 
-    measure = "ROM", 
-    m1i = elevated, sd1i = elevated_sd, n1i = n_plots, 
-    m2i = ambient,  sd2i = ambient_sd,  n2i = n_plots, 
-    data=., 
-    append = TRUE, var.names = c("logr", "logr_var") ) %>% 
-  as_tibble() %>% 
+  metafor::escalc(
+    measure = "ROM",
+    m1i = elevated, sd1i = elevated_sd, n1i = n_plots,
+    m2i = ambient,  sd2i = ambient_sd,  n2i = n_plots,
+    data=.,
+    append = TRUE, var.names = c("logr", "logr_var") ) %>%
+  as_tibble() %>%
   mutate( logr_se = sqrt(logr_var)/sqrt(n_plots) )
 
 ## aggregate by variable, doing a meta-analysis of the log response ratios, with experiment as random factor (method="DL")
 agg_meta <- function(df, groupvar){
-  out_meta <- df %>% dplyr::filter(my_varnam==eval(parse_character(groupvar))) %>% 
+  out_meta <- df %>% dplyr::filter(my_varnam==eval(parse_character(groupvar))) %>%
     metafor::rma( logr, logr_var, method = "DL", data = . )
-  
+
   # transform back
   out_meta_scaled <- predict( out_meta, transf=exp )
-  
+
   tibble(
-    my_varnam=groupvar, 
-    middle = out_meta$b[1,1], 
-    ymin   = out_meta$ci.lb, 
+    my_varnam=groupvar,
+    middle = out_meta$b[1,1],
+    ymin   = out_meta$ci.lb,
     ymax   = out_meta$ci.ub,
-    
-    middle_scaled = out_meta_scaled$pred, 
-    ymin_scaled   = out_meta_scaled$ci.lb, 
+
+    middle_scaled = out_meta_scaled$pred,
+    ymin_scaled   = out_meta_scaled$ci.lb,
     ymax_scaled   = out_meta_scaled$ci.ub
   )
 }
@@ -858,6 +936,119 @@ df_c_leafn_agg %>%
   coord_flip() +
   ylim(-1,1)
 ```
+
+Data used for leaf N calculations:
+```{r eval=FALSE}
+df_leafn %>% select(-prev_name, -Cquantity_Control) %>% distinct(varnam, Data_type, exp_nam, .keep_all=TRUE) %>% knitr::kable()
+```
+
+
+<!-- ## Asat -->
+
+<!-- This analysis is done by Asat and Anet, that is at saturating and ambient PAR, respectively, and always at treatment CO2 levels. -->
+
+<!-- - `my_varnam = "my_asat"`, and `varnam = "asat"`. -->
+<!-- - `my_varnam = "my_anet"`, and `varnam = "anet"`. -->
+
+<!-- Collect information about experiments providing data for any of `varnam %in% c("asat", "anet")` from file `"table_var_exp_names_asat.csv"`. See procedure [here](https://docs.google.com/document/d/11ghws59q6Ts6j6GK6yNqQBvilrNojRN_aC7c41-LrI0/edit?usp=sharing). Add additional information from the experiments table (`table_var_exp_names_experiments.csv`) and from the data frame `df_experiments`, which is used to associate new and old experiments names. -->
+<!-- ```{r, warning=FALSE} -->
+<!-- df_asat <- read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_asat.csv") %>%  -->
+<!--   select(prev_name=expnam, varnam, Data_type, Source_Reference) %>% -->
+<!--   distinct() %>%  -->
+<!--   filter(varnam %in% c("asat", "anet")) %>%  -->
+
+<!--   ## add 'exp_nam' (new experiment name) from data table -->
+<!--   left_join( df_experiments, by="prev_name" ) %>%  -->
+
+<!--   ## add experiments meta information from experiments table -->
+<!--   left_join(  -->
+<!--     read_csv("~/Dropbox/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>%  -->
+<!--       select(prev_name, Fumigation_type=my_fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks), -->
+<!--     by = c("prev_name") -->
+<!--     ) -->
+<!-- ``` -->
+
+<!-- Add `my_varnam` to the data table, defined by `my_varnam = ifelse( varnam == "nmass_leaf", "my_nmass_leaf", my_varnam )`. -->
+<!-- ```{r, warning=FALSE} -->
+<!-- df_c <- df_c %>%  -->
+<!--   left_join( select( df_leafn, exp_nam, Data_type, varnam_unified=varnam ), by=c("exp_nam", "Data_type") ) %>%  -->
+<!--   mutate( varnam = ifelse( is.na(varnam), varnam_unified, varnam ) ) %>%  -->
+<!--   mutate( my_varnam = ifelse( varnam == "nmass_leaf", "my_nmass_leaf", my_varnam ), -->
+<!--           my_varnam = ifelse( varnam == "narea_leaf", "my_narea_leaf", my_varnam ), -->
+<!--           my_varnam = ifelse( varnam == "rcton_leaf", "my_rcton_leaf", my_varnam )) %>%  -->
+<!--   select(-varnam_unified) -->
+<!-- ``` -->
+
+<!-- Now, do the meta-analysis and plot results. -->
+<!-- ```{r, warning=FALSE} -->
+<!-- ## aggregate by variable and experiment, pooling multiple years, sampling dates, and plots/replicates and calculate log response ratio -->
+<!-- df_c_leafn_agg <- df_c %>%                                          -->
+<!--   filter( my_varnam %in% c("my_nmass_leaf", "my_narea_leaf", "my_rcton_leaf") ) %>%  -->
+<!--   mutate( my_ambient_sd = ambient_Sd, my_elevated_sd = elevated_Sd ) %>%   # get standard deviation for all data -->
+<!--   rowwise() %>%  -->
+<!--   mutate( my_ambient_sd   = ifelse( is.na(my_ambient_sd),  ambient_Se  * sqrt(n_plots), my_ambient_sd ), -->
+<!--           my_elevated_sd  = ifelse( is.na(my_elevated_sd), elevated_Se * sqrt(n_plots), my_elevated_sd )) %>% -->
+
+<!--   ## pool all measurements (multiple years, sampling dates and plots) by variable and experiment for meta analysis -->
+<!--   group_by( exp_nam, treatment, my_varnam ) %>%                        # prepare for aggregation -->
+<!--   summarise( ambient     = mean_pooled( ambient, n_plots ),  -->
+<!--              elevated    = mean_pooled( elevated, n_plots ), -->
+<!--              ambient_sd  = sd_pooled( my_ambient_sd, n_plots ), -->
+<!--              elevated_sd = sd_pooled( my_elevated_sd, n_plots ), -->
+<!--              n_plots = sum(n_plots) ) %>%  -->
+
+<!--   ## Get logarithm of response ratio and its variance -->
+<!--   metafor::escalc(  -->
+<!--     measure = "ROM",  -->
+<!--     m1i = elevated, sd1i = elevated_sd, n1i = n_plots,  -->
+<!--     m2i = ambient,  sd2i = ambient_sd,  n2i = n_plots,  -->
+<!--     data=.,  -->
+<!--     append = TRUE, var.names = c("logr", "logr_var") ) %>%  -->
+<!--   as_tibble() %>%  -->
+<!--   mutate( logr_se = sqrt(logr_var)/sqrt(n_plots) ) -->
+
+<!-- ## aggregate by variable, doing a meta-analysis of the log response ratios, with experiment as random factor (method="DL") -->
+<!-- agg_meta <- function(df, groupvar){ -->
+<!--   out_meta <- df %>% dplyr::filter(my_varnam==eval(parse_character(groupvar))) %>%  -->
+<!--     metafor::rma( logr, logr_var, method = "DL", data = . ) -->
+
+<!--   # transform back -->
+<!--   out_meta_scaled <- predict( out_meta, transf=exp ) -->
+
+<!--   tibble( -->
+<!--     my_varnam=groupvar,  -->
+<!--     middle = out_meta$b[1,1],  -->
+<!--     ymin   = out_meta$ci.lb,  -->
+<!--     ymax   = out_meta$ci.ub, -->
+
+<!--     middle_scaled = out_meta_scaled$pred,  -->
+<!--     ymin_scaled   = out_meta_scaled$ci.lb,  -->
+<!--     ymax_scaled   = out_meta_scaled$ci.ub -->
+<!--   ) -->
+<!-- } -->
+
+<!-- # do meta-analysis all variables -->
+<!-- df_meta <- purrr::map_dfr(as.list(unique(df_c_leafn_agg$my_varnam)), ~agg_meta(df_c_leafn_agg, .)) -->
+
+<!-- # Plot -->
+<!-- library(ggplot2) -->
+<!-- df_c_leafn_agg %>% -->
+<!--   ggplot( aes(x=my_varnam, y=logr)) + -->
+<!--   geom_jitter( color = rgb(0,0,0,0.3), aes( size = 1/logr_se ), position = position_jitter(w = 0.2, h = 0) ) + -->
+<!--   geom_crossbar( data = df_meta, aes(x=my_varnam, y=middle, ymin=ymin, ymax=ymax), fill = "grey80", alpha = 0.6, width = 0.5 ) + -->
+<!--   coord_flip() + -->
+<!--   ylim(-1,1) -->
+<!-- ``` -->
+
+<!-- Data used for leaf N calculations: -->
+<!-- ```{r eval=FALSE} -->
+<!-- df_leafn %>% select(-prev_name, -Cquantity_Control) %>% distinct(varnam, Data_type, exp_nam, .keep_all=TRUE) %>% knitr::kable() -->
+<!-- ``` -->
+
+
+
+
+
 
 
 <!-- ```{r, warning=FALSE} -->
