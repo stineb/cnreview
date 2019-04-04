@@ -41,6 +41,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
   out_nlabl       <- c()
   out_nloss       <- c()
   out_netmin      <- c()
+  out_nup         <- c()
   out_clitterfall <- c()
   out_nlitterfall <- c()
   
@@ -189,18 +190,19 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     }
     
     ## gather output variables
-    print(paste("itout: ", itout))
+    # print(paste("itout: ", itout))
     if ( itout > 0 ){
-      out_cplant_ag[itout] <- cplant_ag
-      out_nplant_ag[itout] <- nplant_ag
-      out_cplant_bg[itout] <- cplant_bg
-      out_nplant_bg[itout] <- nplant_bg
-      out_csoil[itout]     <- csoil
-      out_nsoil[itout]     <- nsoil
-      out_clabl[itout]     <- clabl
-      out_nlabl[itout]     <- nlabl
-      out_nloss[itout]     <- netmin - nlabl
-      out_netmin[itout]    <- netmin
+      out_cplant_ag[itout]   <- cplant_ag
+      out_nplant_ag[itout]   <- nplant_ag
+      out_cplant_bg[itout]   <- cplant_bg
+      out_nplant_bg[itout]   <- nplant_bg
+      out_csoil[itout]       <- csoil
+      out_nsoil[itout]       <- nsoil
+      out_clabl[itout]       <- clabl
+      out_nlabl[itout]       <- nlabl
+      out_nloss[itout]       <- netmin - nlabl
+      out_netmin[itout]      <- netmin
+      out_nup[itout]         <- nlabl
       out_clitterfall[itout] <- c_litterfall
       out_nlitterfall[itout] <- n_litterfall
     }
@@ -209,136 +211,21 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
   ##----------------------------------------------END OF LOOP
 
   df_out <- tibble(
-    simyear   = 1:ntout,
-    cplant_ag = out_cplant_ag,
-    nplant_ag = out_nplant_ag,
-    cplant_bg = out_cplant_bg,
-    nplant_bg = out_nplant_bg,
-    csoil     = out_csoil,
-    nsoil     = out_nsoil,
-    clabl     = out_clabl,
-    nlabl     = out_nlabl,
-    nloss     = out_nloss,
-    netmin    = out_netmin,
+    simyear      = 1:ntout,
+    cplant_ag    = out_cplant_ag,
+    nplant_ag    = out_nplant_ag,
+    cplant_bg    = out_cplant_bg,
+    nplant_bg    = out_nplant_bg,
+    csoil        = out_csoil,
+    nsoil        = out_nsoil,
+    clabl        = out_clabl,
+    nlabl        = out_nlabl,
+    nloss        = out_nloss,
+    netmin       = out_netmin,
+    nup          = out_nup,
     c_litterfall = out_clitterfall,
     n_litterfall = out_nlitterfall
   )
 
   return(df_out)
 }
-
-## Simulation settings
-settings <- list(
-  # ntsteps = 5000
-  spinupyears = 3000,
-  nyeartrend  = 1000,
-  out_spinup  = FALSE,
-  yr_soileq   = 600
-  )
-
-## model parameters
-par <- list(
-  r_cton_plant = 30,
-  r_cton_soil  = 10,
-  tau_plant    = 10,
-  tau_soil_c   = 50,
-  tau_soil_n   = 150,
-  tau_labl     = 0.5,
-  sla          = 0.1,
-  eff          = 1.0,
-  kl           = 50,
-  kr           = 80,
-  alpha_fix    = 0.6    # only used for "conly" method
-)
-
-## Environmental conditions
-ppfd <- 90
-lue  <- rep(1, settings$nyeartrend); lue[101:settings$nyeartrend] <- 1.2
-n_in <- 0.8
-
-## Run the model
-df_scn <- scn_model( ctot0=100, csoil0=100, 
-                     ppfd=ppfd, lue=lue, n_in=n_in, 
-                     par=par, settings=settings, method="scn", accelerate=FALSE
-                     )
-df_scn_acc <- scn_model(  ctot0=100, csoil0=100, 
-                          ppfd=ppfd, lue=lue, n_in=n_in, 
-                          par=par, settings=settings, method="scn", accelerate=TRUE
-                        )
-
-library(ggplot2)
-df_scn %>%
-  tidyr::gather(varnam, value, c(cplant_ag, cplant_bg)) %>% 
-  ggplot( aes(x=simyear, y=value, color=varnam)) +
-  geom_line() +
-  labs(title="Plant C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=csoil) ) +
-  geom_line() +
-  labs(title="Soil C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
-  expand_limits(y=0)
-
-gg <- ggplot() +
-  geom_line( data=df_scn, aes(x=simyear, y=nsoil) ) +
-  labs(title="Soil N", x="Simulation Year", y=expression(paste("N pool (g N m"^{-2}, ")"))) +
-  geom_line( data=df_scn_acc, aes(x=simyear, y=nsoil), linetype="dashed") +
-  geom_vline(xintercept = ifelse(settings$out_spinup, settings$spinupyears, 0), linetype="dotted") +
-  expand_limits(y=0)
-print(gg)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=clabl) ) +
-  geom_line() +
-  labs(title="Labile C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=clabl/nlabl) ) +
-  geom_line() +
-  labs(title="Labile C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  geom_hline(yintercept=par$r_cton_plant, linetype="dotted") +
-  expand_limits(y=0)
-
-soil_cton_expected <- par$r_cton_plant * par$tau_soil_c / par$tau_soil_n
-df_scn %>% 
-  ggplot( aes(x=simyear, y=csoil/nsoil) ) +
-  geom_line() +
-  labs(title="Soil C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  geom_hline(yintercept=soil_cton_expected, linetype="dotted") +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=c_litterfall/n_litterfall) ) +
-  geom_line() +
-  labs(title="Litterfall C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  geom_hline(yintercept=par$r_cton_plant, linetype="dotted") +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=(cplant_ag+cplant_bg)/(nplant_ag+nplant_bg)) ) +
-  geom_line() +
-  labs(title="Plant C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=nloss) ) +
-  geom_line() +
-  labs(title="N losses", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_hline(yintercept = n_in, linetype="dotted") +
-  expand_limits(y=0)
-
-netmin_expected <- n_in + par$r_cton_plant^(-1) * (tail(df_scn$cplant_ag, 1) + tail(df_scn$cplant_bg, 1))/par$tau_plant
-df_scn %>% 
-  ggplot( aes(x=simyear, y=netmin) ) +
-  geom_line() +
-  labs(title="Net N mineralization", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_hline(yintercept = netmin_expected, linetype="dotted") +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) +
-  geom_line() +
-  labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)") +
-  expand_limits(y=0)
