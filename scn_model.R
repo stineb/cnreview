@@ -1,11 +1,19 @@
 scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="scn", accelerate=FALSE ){
 
+  ## N acquisition function
   f_supply <- function( cbg, n0, f_unavoid, kr ){
     (1.0 - f_unavoid) * n0 * cbg / (cbg + kr )
   }
+  
+  ## Productivity function
   prod <- function(leafarea, ppfd, lue, kl ){
     ppfd * lue * leafarea / (leafarea + kl )
   }
+  # prod <- function(leafarea, ppfd, lue, kl ){
+  #   ppfd * lue * (1-exp(-0.5 * leafarea))
+  # }  
+  
+  ## N demand function (~productivity)
   f_ndemand <- function( ..., r_cton_plant ){
     (1/r_cton_plant) * prod(...)
   }
@@ -144,6 +152,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     ## Get balanced allocation
     if (method=="conly"){
       
+      ## use prescribed allocation fraction
       root <- par$alpha_fix
 
       ## redesign the plant (immediate par$effect assumption)
@@ -157,6 +166,8 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       nplant_bg <- cplant_bg * r_ntoc_plant
       
       clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
+
+      ## Assume N required (~clabl) is automatically matched by N supply, irrespective of belowground C
       nlabl <- r_ntoc_plant * clabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
       
@@ -188,6 +199,26 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
       
+    } else if (method=="minimum"){
+
+      ## use prescribed allocation fraction
+      root <- par$alpha_fix
+
+      ## redesign the plant (immediate par$effect assumption)
+      clabl <- 0
+      nlabl <- 0
+      cplant_ag <- root * ctot
+      aleaf <- par$sla * cplant_ag
+      cplant_bg <- (1 - root) * ctot
+      
+      nplant_ag <- cplant_ag * r_ntoc_plant
+      nplant_bg <- cplant_bg * r_ntoc_plant
+      
+      clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
+      nlabl <- f_supply( cplant_bg, n0=netmin, kr=par$kr, f_unavoid = par$f_unavoid ) #+ nlabl
+
+    } else {
+      rlang::abort("Specify a valid method (argument to scn_model().")
     }
     
     ## gather output variables

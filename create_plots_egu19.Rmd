@@ -57,7 +57,7 @@ par <- list(
 ```{r}
 ppfd <- 90
 lue  <- 1.0
-lue_manip <- rep(1, settings$nyeartrend); lue_manip[101:settings$nyeartrend] <- 1.1
+lue_manip <- rep(1, settings$nyeartrend); lue_manip[101:settings$nyeartrend] <- 1.15
 n_in <- 0.8
 n_in_manip <- rep(0.8, settings$nyeartrend); n_in_manip[101:settings$nyeartrend] <- 0.9
 ```
@@ -101,6 +101,15 @@ df_scn_c_unavoid <- scn_model( ctot0=100, csoil0=100,
                      par=par_unavoid, settings=settings, method="scn", accelerate=FALSE
                      )
 
+## "CO2" run (ambient N) with "minimum model"
+par_mini <- par
+par_mini$alpha_fix <- 0.55
+df_scn_c_mini <- scn_model( ctot0=100, csoil0=100, 
+                     ppfd=ppfd, lue=lue_manip, n_in=n_in, 
+                     par=par_mini, settings=settings, method="minimum", accelerate=FALSE
+                     )
+
+## Accelerated equilibration
 # df_scn_acc <- scn_model(  ctot0=100, csoil0=100, 
 #                           ppfd=ppfd, lue=lue, n_in=n_in, 
 #                           par=par, settings=settings, method="scn", accelerate=TRUE
@@ -137,6 +146,18 @@ df_scn_f %>%
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("n_supply_demand_nfert.pdf", width=4, height=3)
+
+df_scn_f %>%
+  ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) +
+  geom_line(size=1) +
+  labs(
+    title="Root:shoot ratio", 
+    x="Simulation Year", 
+    y="ratio (unitless)",
+    subtitle = "N fertilisation at year 100") +
+  expand_limits(y=c(0.25,0.75))+
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("rootshoot_f.pdf", width=4, height=3)
 ```
 
 #### Elevated CO2
@@ -171,6 +192,19 @@ ggplot( data = df_scn_c, aes(x=simyear, y=cplant_bg/nup)) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("ncost_co2.pdf", width=4, height=3)
+
+df_scn_c %>%
+  mutate(rootshoot=cplant_bg/cplant_ag) %>% 
+  ggplot( aes(x=simyear, y=rootshoot) ) +
+  geom_line(size=1) +
+  labs(
+    title="Root:shoot ratio", 
+    x="Simulation Year", 
+    y="ratio (unitless)",
+    subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=c(0.25,0.75))+
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("rootshoot_c.pdf", width=4, height=3)
 ```
 
 #### Slow decomposition rate
@@ -258,8 +292,34 @@ df_scn_c %>%
 ggsave("cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
 ```
 
+#### Minimum model
 
+```{r}
+df_scn_c %>% 
+  select(simyear, cplant_ag) %>% 
+  left_join( select( df_scn_c_mini, simyear, cplant_ag_mini=cplant_ag ), by="simyear" ) %>%
+  tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_mini)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam)) +
+  geom_line( size=1 ) +
+  labs(title="Aboveground plant C", 
+       x="Simulation Year", 
+       y=expression(paste("C pool (g C m"^{-2}, ")")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted") +
+  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_mini"), labels=c("sCN model", "Minimum model"))
+ggsave("abgm_co2_slow.pdf", width=4, height=3)
 
+```
+
+## Next steps
+
+- Confront with $min(N_\text{demand} = N_\text{supply})$ model.
+- Explicitly resolve the dynamics of an inorganic N pool
+- Relax the assumption of "immediate re-design"
+- Introduce $\alpha$ (fraction of aboveground biomass as foliage)
+- Maximise $(1-\alpha)$
+- Calibrate 
 
 
 <!-- ```{r} -->
@@ -271,11 +331,6 @@ ggsave("cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
 <!--   expand_limits(y=0) -->
 
 
-<!-- df_scn %>%  -->
-<!--   ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) + -->
-<!--   geom_line() + -->
-<!--   labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)") + -->
-<!--   expand_limits(y=0) -->
 
 <!-- df_scn %>%  -->
 <!--   ggplot( aes(x=simyear, y=csoil) ) + -->
