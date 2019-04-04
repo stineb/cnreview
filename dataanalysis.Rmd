@@ -871,14 +871,115 @@ df_c <- df_c %>%
   select(-varnam_unified)
 ```
 
+## Root:shoot ratio
+
+Collect experiments info directly from data table.
+```{r eval=FALSE}
+df_c %>% 
+  filter(Data_type=="root-shoot_ratio") %>% 
+  select(exp_nam, prev_name, Fumigation_type.x, Vegetation_type.x ) %>% 
+  distinct() %>% 
+  knitr::kable()
+```
+
+Add `my_varnam` to the data table.
+```{r}
+df_c <- df_c %>%
+  mutate( my_varnam = ifelse( Data_type == "root-shoot_ratio", "my_rootshootratio", my_varnam ) )
+```
+
+
+## N uptake
+
+Collect experiments info directly from data table.
+```{r eval=FALSE}
+df_c %>% 
+  filter(Data_type %in% c("N_uptake", "NH4+_uptake", "NO3-_uptake") ) %>% 
+  select(exp_nam, prev_name, Fumigation_type.x, Vegetation_type.x ) %>% 
+  distinct() %>% 
+  knitr::kable()
+```
+
+Add `my_varnam` to the data table.
+```{r}
+df_c <- df_c %>%
+  mutate( my_varnam = ifelse( Data_type %in% c("N_uptake", "NH4+_uptake", "NO3-_upttake") , "my_nup", my_varnam ) )
+```
+
+
+## N leaching
+
+Collect experiments info directly from data table.
+```{r eval=TRUE}
+df_c %>% 
+  filter(Data_type %in% c("N_leaching") ) %>% 
+  select(exp_nam, prev_name, Fumigation_type.x, Vegetation_type.x ) %>% 
+  distinct() %>% 
+  View()
+```
+
+Add `my_varnam` to the data table.
+```{r}
+df_c <- df_c %>%
+  mutate( my_varnam = ifelse( Data_type %in% c("N_leaching") , "my_nleach", my_varnam ) )
+```
+
+**SO FAR ONLY AVAILABLE FOR ONE EXPERIMENT. THEREFORE OMITTED IN META-ANALYSIS.**
+
+## N2O emissions
+
+Collect experiments info directly from data table.
+```{r eval=TRUE}
+df_c %>% 
+  filter(Data_type == "soil_N2O_efflux" ) %>% 
+  select(exp_nam, prev_name, Fumigation_type.x, Vegetation_type.x ) %>% 
+  distinct() %>% 
+  View()
+```
+
+Add `my_varnam` to the data table.
+```{r}
+df_c <- df_c %>%
+  mutate( my_varnam = ifelse( Data_type %in% c("soil_N2O_efflux") , "my_n2o", my_varnam ) )
+```
+
+**SO FAR ONLY AVAILABLE FOR ONE EXPERIMENT. THEREFORE OMITTED IN META-ANALYSIS.**
+
+## Soil C decomposition
+
+Take data directly from Van Groenigen et al. (2014).
+```{r eval=TRUE}
+df_soilc_c <- read_csv(file="~/Dropbox/data/gcme/data_received_190325/soilc_decomp_vangroenigen14.csv") %>% 
+  filter(treatment=="c") %>%
+  
+  ## Back-calculate SD of k from column wVk = 1/(SD_ambient^2/k_ambient^2 + SD_elevated^2/k_elevated^2)
+  ## assuming that ambient_Sd = elevated_Sd
+  rowwise() %>% 
+  mutate( n_plots = n_experiments * n_ambient ) %>% 
+  mutate( ambient_Sd = k_ambient * k_elevated / sqrt(wVk * (k_ambient^2 + k_elevated^2)) ) %>%
+  mutate( elevated_Sd = ambient_Sd,
+          varnam = "kdecay_soil",
+          my_varnam = "my_kdecay_soil" ) %>% 
+  left_join(df_experiments, by="prev_name")
+  
+df_c <- df_c %>% 
+  full_join( 
+    select(df_soilc_c, exp_nam, prev_name, varnam, my_varnam, exp_nam_vangroenigen, ambient=k_ambient, elevated=k_elevated, ambient_Sd, elevated_Sd, n_plots ),
+    by = c("prev_name", "exp_nam", "ambient", "elevated", "ambient_Sd", "elevated_Sd", "varnam", "my_varnam", "n_plots"))
+```
+
+**ISSUE: No invormation on SD of decomposition rate estimates in ambient and elevated available.**
+
 
 ## For labeling
 
 Prepare variable name association for labelling plots
 ```{r}
 df_varnams <- tibble(
-  my_varnam = c("my_anpp", "my_nmass_leaf", "my_narea_leaf", "my_asat", "my_anet", "my_bnpp", "my_navl"),
-  my_lab    = c("ANPP",    "Nmass",         "Narea",         "Asat",    "Anet",    "BNPP",    "Navl")
+  my_varnam = c("my_anpp", "my_nmass_leaf", "my_narea_leaf", "my_asat", "my_anet", "my_bnpp", "my_navl",
+                "my_rootshootratio", "my_nup",   "my_nleach",  "my_n2o",        "my_kdecay_soil"),
+  my_lab    = c("ANPP",    "Leaf Nmass",    "Leaf Narea",    "Asat",    "Anet",    "BNPP",    "N availability",
+                "root:shoot ratio",  "N uptake", "N leaching", "N2O emissions", "Soil decomposition rate")
 )
 ```
 
@@ -896,8 +997,9 @@ library(metafor)   # see ?dat.curtis1998 for an example with CO2 manipulation da
 ## aggregate by variable and experiment, pooling multiple years, sampling dates, and plots/replicates and calculate log response ratio
 df_c_sub <- df_c %>%         
   
-  ## Here only for my variables, selected as described above (leaving out "my_anet")
-  filter(my_varnam %in% c("my_anpp", "my_nmass_leaf", "my_narea_leaf", "my_asat", "my_bnpp", "my_navl")) %>%
+  ## Here only for my variables, selected as described above 
+  ## (leaving out "my_anet"; omitting "my_nleach" and "my_n2o" because only one experiment available)
+  filter(my_varnam %in% c("my_anpp", "my_nmass_leaf", "my_narea_leaf", "my_asat", "my_bnpp", "my_navl", "my_rootshootratio", "my_nup", "my_kdecay_soil")) %>%
   
   # get standard deviation for all data
   mutate( my_ambient_sd = ambient_Sd, my_elevated_sd = elevated_Sd ) %>%
@@ -935,7 +1037,10 @@ df_c_agg <- df_c_sub %>%
              by = c("exp_nam", "my_varnam") ) %>% 
   rename( logr = es, logr_var = var ) %>% 
   mutate( logr_se = sqrt(logr_var)/sqrt(n_plots) ) %>% 
-  left_join( df_varnams, by = "my_varnam" )
+  left_join( df_varnams, by = "my_varnam" ) %>% 
+  
+  ## filter NA for exp_nam due to unidentified experiment name in soil decomposition dataset
+  filter(exp_nam!="NA" & !is.na(exp_nam))
 
 ## aggregate by variable, doing a meta-analysis of the log response ratios, with experiment as random factor (method="DL")
 agg_meta <- function(df, groupvar){
@@ -943,7 +1048,8 @@ agg_meta <- function(df, groupvar){
   out_meta <- df %>% dplyr::filter(my_varnam==eval(parse_character(groupvar))) %>% 
     
     # main meta analysis function call, adjusted step size (see http://www.metafor-project.org/doku.php/tips:convergence_problems_rma)
-    metafor::rma( logr, logr_var, method = "REML", slab = exp_nam, control = list(stepadj=0.3), data = . )
+    # metafor::rma( logr, logr_var, method = "REML", slab = exp_nam, control = list(stepadj=0.3), data = . )
+    metafor::rma.mv( logr, logr_var, method = "REML", random = ~ 1 | exp_nam, slab = exp_nam, control = list(stepadj=0.3), data = . )
   
   # transform back
   out_meta_scaled <- predict( out_meta, transf=exp )
@@ -966,15 +1072,18 @@ varlist <- unique(df_c_agg$my_varnam)
 list_meta  <- purrr::map(as.list(varlist), ~agg_meta(df_c_agg, .))
 df_metabox <- purrr::map_dfr(list_meta, "df_box") %>% left_join( df_varnams, by = "my_varnam" )
 names(list_meta) <- varlist
-
-# Plot dots and my box
+```
+Plot dots and my box
+```{r}
 library(ggplot2)
 df_c_agg %>%
+  # arrange(logr) %>% 
+  mutate( my_lab = factor(my_lab, levels=rev(c("Asat", "Leaf Nmass", "Leaf Narea", "ANPP", "N uptake", "N availability", "root:shoot ratio", "BNPP", "Soil decomposition rate")))) %>% 
   ggplot( aes(x=my_lab, y=logr)) +
   geom_jitter( color = rgb(0,0,0,0.3), aes( size = 1/logr_se ), position = position_jitter(w = 0.2, h = 0) ) +
   geom_crossbar( data = df_metabox, aes(x=my_lab, y=middle, ymin=ymin, ymax=ymax), fill = "grey80", alpha = 0.6, width = 0.5 ) +
   geom_hline( yintercept=0.0, size=0.5 ) +
-  labs(x="") +
+  labs(x="", y="Log Response Ratio", size="1/SE") +
   coord_flip() +
   ylim(-1,1) 
 ```
@@ -989,7 +1098,7 @@ forest_byvar <- function(list_meta, varnam_lab){
   text(out_forest$xlim[1], out_forest$ylim[2], varnam_lab,  pos=4, cex=0.7, font=2 )
 }
 
-df_varnams_sub <- df_varnams %>% filter(my_varnam!="my_anet")
+df_varnams_sub <- df_varnams %>% filter(!(my_varnam %in% c("my_anet", "my_n2o", "my_nleach")))
 purrr::map(
   as.list(1:nrow(df_varnams_sub)), 
   ~forest_byvar(list_meta[[df_varnams_sub$my_varnam[.]]], df_varnams_sub$my_lab[.])
@@ -998,8 +1107,36 @@ purrr::map(
 
 This shows the log-response ratio of ANPP, each dot for one experiment, multiple years, sampling dates, and plots pooled. The size of the dots represents the standard error of the response ratio (the smaller, the bigger). The box represents the meta-analysis mean and confidence interval of the log response ratio.
 
+## Couplings
 
+Plot effect sizes for two different variables against each other, given that data is available for both variables for a given experiment.
 
+### ANPP-BNPP
+
+```{r}
+df_c_anpp_bnpp <- df_c_agg %>% 
+  filter(my_lab %in% c("ANPP", "BNPP")) %>% 
+  select(exp_nam, my_lab, logr) %>%
+  tidyr::spread( my_lab, logr )
+
+df_c_anpp_bnpp <- df_c_agg %>% 
+  filter(my_lab %in% c("ANPP", "BNPP")) %>% 
+  select(exp_nam, my_lab, logr_se) %>%
+  tidyr::spread( my_lab, logr_se ) %>% 
+  rename(seANPP=ANPP, seBNPP=BNPP) %>%
+  right_join(df_c_anpp_bnpp, by="exp_nam") %>% 
+  mutate(se = seANPP*seBNPP)
+
+df_c_anpp_bnpp %>% 
+  ggplot(aes(x=ANPP, y=BNPP, label=exp_nam)) +
+  geom_point(aes(size=1/se)) +
+  xlim(0, 0.8) + ylim(0, 0.8) +
+  geom_abline() + 
+  ggrepel::geom_text_repel(size=3, point.padding = 0.5, segment.alpha = 0) +
+  labs(x="Log Response Ratio of ANPP", y="Log Response Ratio of BNPP", size="1/SE")
+  # geom_errorbar(aes(ymin=BNPP-seBNPP, ymax=BNPP+seBNPP)) +
+  # geom_errorbarh(aes(xmin=ANPP-seANPP, xmax=ANPP+seANPP))
+```
 
 <!-- **Issue:** -->
 
