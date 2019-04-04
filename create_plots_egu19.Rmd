@@ -413,6 +413,18 @@ df_scn_c_nmin %>%
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("fig/nloss_c_nmin.pdf", width=4, height=3)
 
+df_scn_c_nmin %>%
+  ggplot( aes(x=simyear, y=nmin) ) +
+  geom_line(size=1) +
+  labs(
+    title="Mineral N pool", 
+    x="Simulation Year", 
+    y=expression(paste("N pool (g N m"^{-2}, ")")),
+    subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=c(0.25,0.75))+
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/nmin_c_nmin.pdf", width=4, height=3)
+
 df_scn_c_nmin %>% 
   ggplot( aes(x=simyear, y=cplant_bg/nup)) +
   geom_line( size=1 ) +
