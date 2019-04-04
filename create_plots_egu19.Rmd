@@ -18,7 +18,9 @@ header-includes:
 
 ```{r setup, include=FALSE}
 library(dplyr)
+library(ggplot2)
 source("scn_model.R")
+source("scn_nmin_model.R")
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -44,6 +46,7 @@ par <- list(
   tau_soil_c   = 3,
   tau_soil_n   = 9,
   tau_labl     = 0.5,
+  tau_nmin     = 2,
   sla          = 0.1,
   eff          = 1.0,
   kl           = 50,
@@ -58,6 +61,10 @@ par <- list(
 ppfd <- 90
 lue  <- 1.0
 lue_manip <- rep(1, settings$nyeartrend); lue_manip[101:settings$nyeartrend] <- 1.15
+lue_grad  <- rep(1, settings$nyeartrend)
+lue_grad[101:settings$nyeartrend] <- NA
+lue_grad[settings$nyeartrend] <- 1.2
+lue_grad <- zoo::na.approx(lue_grad)
 n_in <- 0.8
 n_in_manip <- rep(0.8, settings$nyeartrend); n_in_manip[101:settings$nyeartrend] <- 0.9
 ```
@@ -102,11 +109,31 @@ df_scn_c_unavoid <- scn_model( ctot0=100, csoil0=100,
                      )
 
 ## "CO2" run (ambient N) with "minimum model"
-par_mini <- par
-par_mini$alpha_fix <- 0.55
-df_scn_c_mini <- scn_model( ctot0=100, csoil0=100, 
+par_liebig <- par
+par_liebig$alpha_fix <- 0.7
+df_sc_liebig <- scn_model( ctot0=100, csoil0=100,
                      ppfd=ppfd, lue=lue_manip, n_in=n_in, 
-                     par=par_mini, settings=settings, method="minimum", accelerate=FALSE
+                     par=par_liebig, settings=settings, method="conly", accelerate=FALSE
+                     )
+
+## "CO2" run (ambient N) with "minimum model"
+par_liebig <- par
+par_liebig$alpha_fix <- 0.7
+df_scn_c_nmin_liebig <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
+                     ppfd=ppfd, lue=lue_manip, n_in=n_in, 
+                     par=par_liebig, settings=settings, method="minimum", accelerate=FALSE
+                     )
+
+## "CO2" run (ambient N) with model with explicity mineral N pool
+df_scn_c_nmin <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
+                     ppfd=ppfd, lue=lue_manip, n_in=n_in, 
+                     par=par, settings=settings, method="scn", accelerate=FALSE
+                     )
+
+## "CO2" run (ambient N) with model with explicity mineral N pool
+df_scn_c_nmin_grad <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
+                     ppfd=ppfd, lue=lue_grad, n_in=n_in, 
+                     par=par, settings=settings, method="scn", accelerate=FALSE
                      )
 
 ## Accelerated equilibration
@@ -130,7 +157,7 @@ ggplot( data = df_scn_f, aes(x=simyear, y=cplant_ag)) +
        subtitle = "N fertilisation at year 100") +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("abgm_nfert.pdf", width=4, height=3)
+ggsave("fig/abgm_nfert.pdf", width=4, height=3)
 
 df_scn_f %>% 
   rowwise() %>% 
@@ -145,7 +172,7 @@ df_scn_f %>%
        subtitle = "N fertilisation at year 100") +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("n_supply_demand_nfert.pdf", width=4, height=3)
+ggsave("fig/n_supply_demand_nfert.pdf", width=4, height=3)
 
 df_scn_f %>%
   ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) +
@@ -157,7 +184,7 @@ df_scn_f %>%
     subtitle = "N fertilisation at year 100") +
   expand_limits(y=c(0.25,0.75))+
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("rootshoot_f.pdf", width=4, height=3)
+ggsave("fig/rootshoot_f.pdf", width=4, height=3)
 ```
 
 #### Elevated CO2
@@ -171,7 +198,7 @@ ggplot( data = df_scn_c, aes(x=simyear, y=cplant_ag)) +
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("abgm_co2.pdf", width=4, height=3)
+ggsave("fig/abgm_co2.pdf", width=4, height=3)
 
 ggplot( data = df_scn_c, aes(x=simyear, y=nup)) +
   geom_line( size=1 ) +
@@ -181,7 +208,7 @@ ggplot( data = df_scn_c, aes(x=simyear, y=nup)) +
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("nup_co2.pdf", width=4, height=3)
+ggsave("fig/nup_co2.pdf", width=4, height=3)
 
 ggplot( data = df_scn_c, aes(x=simyear, y=cplant_bg/nup)) +
   geom_line( size=1 ) +
@@ -191,7 +218,7 @@ ggplot( data = df_scn_c, aes(x=simyear, y=cplant_bg/nup)) +
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("ncost_co2.pdf", width=4, height=3)
+ggsave("fig/ncost_co2.pdf", width=4, height=3)
 
 df_scn_c %>%
   mutate(rootshoot=cplant_bg/cplant_ag) %>% 
@@ -204,7 +231,7 @@ df_scn_c %>%
     subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=c(0.25,0.75))+
   geom_vline(xintercept = 100, linetype="dotted")
-ggsave("rootshoot_c.pdf", width=4, height=3)
+ggsave("fig/rootshoot_c.pdf", width=4, height=3)
 ```
 
 #### Slow decomposition rate
@@ -223,7 +250,7 @@ df_scn_c %>%
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted") +
   scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_slow"), labels=c("Fast soil turnover", "Slow soil turnover"))
-ggsave("abgm_co2_slow.pdf", width=4, height=3)
+ggsave("fig/abgm_co2_slow.pdf", width=4, height=3)
 ```
 
 #### N losses
@@ -244,7 +271,7 @@ df_scn_c %>%
     breaks=c("nloss_c", "nloss_cf"), 
     labels=c("Low N", "High N"))+
   expand_limits(y=0)
-ggsave("nloss_co2_nhilo.pdf", width=4, height=3)
+ggsave("fig/nloss_co2_nhilo.pdf", width=4, height=3)
 
 ## CO2 effect on biomass
 df_scn_c %>%
@@ -265,7 +292,7 @@ df_scn_c %>%
     breaks=c("cplant_ag_c", "cplant_ag_cf"), 
     labels=c("Low N", "High N"))+
   expand_limits(y=0)
-ggsave("cplant_ag_co2_nhilo.pdf", width=5, height=3)
+ggsave("fig/cplant_ag_co2_nhilo.pdf", width=5, height=3)
 
 ```
 
@@ -289,16 +316,36 @@ df_scn_c %>%
     breaks=c("cplant_ag", "cplant_ag_unavoid"), 
     labels=c("No unavoidable losses", "With unavoidable losses"))+
   expand_limits(y=0)
-ggsave("cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
+ggsave("fig/cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
 ```
+
+#### C-only model
+
+```{r}
+df_sc_liebig %>% 
+  select(simyear, cplant_ag_conly=cplant_ag) %>% 
+  left_join( select( df_scn_c_nmin_liebig, simyear, cplant_ag_liebig=cplant_ag ), by="simyear" ) %>%
+  tidyr::gather(varnam, value, c(cplant_ag_conly, cplant_ag_liebig)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam)) +
+  geom_line( size=1, aes(linetype=varnam) ) +
+  labs(title="Aboveground plant C", 
+       x="Simulation Year", 
+       y=expression(paste("C pool (g C m"^{-2}, ")")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted") +
+  scale_color_discrete(name="", breaks=c("cplant_ag_conly", "cplant_ag_liebig"), labels=c("C-only model", "Minimum model"))
+ggsave("fig/abgm_co2_liebig_conly.pdf", width=4, height=3)
+```
+
 
 #### Minimum model
 
 ```{r}
-df_scn_c %>% 
+df_scn_c_nmin %>% 
   select(simyear, cplant_ag) %>% 
-  left_join( select( df_scn_c_mini, simyear, cplant_ag_mini=cplant_ag ), by="simyear" ) %>%
-  tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_mini)) %>% 
+  left_join( select( df_scn_c_nmin_liebig, simyear, cplant_ag_liebig=cplant_ag ), by="simyear" ) %>%
+  tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_liebig)) %>% 
   ggplot( aes(x=simyear, y=value, color=varnam)) +
   geom_line( size=1 ) +
   labs(title="Aboveground plant C", 
@@ -307,9 +354,123 @@ df_scn_c %>%
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted") +
-  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_mini"), labels=c("sCN model", "Minimum model"))
-ggsave("abgm_co2_slow.pdf", width=4, height=3)
+  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_liebig"), labels=c("sCN model", "Minimum model"))
+ggsave("fig/abgm_co2_liebig.pdf", width=4, height=3)
+```
 
+#### Explicity mineral N pool
+
+```{r}
+df_scn_c %>% 
+  select(simyear, cplant_ag) %>% 
+  left_join( select( df_scn_c_nmin, simyear, cplant_ag_nmin=cplant_ag ), by="simyear" ) %>%
+  tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_nmin)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam)) +
+  geom_line( size=1 ) +
+  labs(title="Aboveground plant C", 
+       x="Simulation Year", 
+       y=expression(paste("C pool (g C m"^{-2}, ")")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted") +
+  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_nmin"), labels=c("sCN model", "Explicit mineral N"))
+ggsave("fig/abgm_co2_nmin.pdf", width=4, height=3)
+
+df_scn_c_nmin %>%
+  mutate(rootshoot=cplant_bg/cplant_ag) %>% 
+  mutate(rootshoot=rootshoot/rootshoot[1]) %>% 
+  select(simyear, rootshoot) %>% 
+  left_join( 
+    select( 
+      mutate(df_scn_c_nmin_grad, rootshoot_grad=cplant_bg/cplant_ag) %>% 
+        mutate(rootshoot_grad=rootshoot_grad/rootshoot_grad[1]), 
+      simyear, rootshoot_grad), 
+    by="simyear") %>% 
+  tidyr::gather(varnam, value, c(rootshoot, rootshoot_grad)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam) ) +
+  geom_line(size=1) +
+  labs(
+    title="Response of root:shoot ratio", 
+    x="Simulation Year", 
+    y="Ratio (unitless)",
+    subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  scale_color_discrete(
+    name="", 
+    breaks=c("rootshoot", "rootshoot_grad"), 
+    labels=c("Step increase", "Gradual"))+
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/rootshoot_c_nmin_grad.pdf", width=4, height=3)
+
+df_scn_c_nmin %>%
+  ggplot( aes(x=simyear, y=nloss) ) +
+  geom_line(size=1) +
+  labs(
+    title="N loss", 
+    x="Simulation Year", 
+    y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")")),
+    subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=c(0.25,0.75))+
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/nloss_c_nmin.pdf", width=4, height=3)
+
+df_scn_c_nmin %>% 
+  ggplot( aes(x=simyear, y=cplant_bg/nup)) +
+  geom_line( size=1 ) +
+  labs(title="N cost", 
+       x="Simulation Year", 
+       y=expression(paste("g C yr g N"^{-1})),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/ncost_co2_nmin.pdf", width=4, height=3)
+
+df_scn_c_nmin %>%
+  mutate(ncost=cplant_bg/nup) %>% 
+  mutate(ncost=ncost/ncost[1]) %>% 
+  select(simyear, ncost) %>% 
+  left_join( 
+    select( 
+      mutate(df_scn_c_nmin_grad, ncost_grad=cplant_bg/nup) %>% 
+        mutate(ncost_grad=ncost_grad/ncost_grad[1]), 
+      simyear, ncost_grad), 
+    by="simyear") %>% 
+  tidyr::gather(varnam, value, c(ncost, ncost_grad)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam) ) +
+  geom_line(size=1) +
+  labs(
+    title="Response of N cost", 
+    x="Simulation Year", 
+    y="Ratio (unitless)",
+    subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  scale_color_discrete(
+    name="", 
+    breaks=c("ncost", "ncost_grad"), 
+    labels=c("Step increase", "Gradual"))+
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/ncost_c_nmin_grad.pdf", width=4, height=3)
+
+
+df_scn_c_nmin %>% 
+  ggplot( aes(x=simyear, y=nup)) +
+  geom_line( size=1 ) +
+  labs(title="N uptake", 
+       x="Simulation Year", 
+       y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/nup_co2_nmin.pdf", width=4, height=3)
+
+df_scn_c_nmin %>% 
+  ggplot( aes(x=simyear, y=nloss/nup)) +
+  geom_line( size=1 ) +
+  labs(title="N cycle openness", 
+       x="Simulation Year", 
+       y=expression(paste("N"[loss], "/N"[uptake])),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/nopen_co2_nmin.pdf", width=4, height=3)
 ```
 
 ## Next steps
@@ -320,6 +481,8 @@ ggsave("abgm_co2_slow.pdf", width=4, height=3)
 - Introduce $\alpha$ (fraction of aboveground biomass as foliage)
 - Maximise $(1-\alpha)$
 - Calibrate 
+- Find out (analytically) why root:shoot ratio returns to the same value as initially
+- Find out why the minimum model has such a strong fertilisation effect (maybe if it's calibrated to reasonable regions, the sensitivity declines?)
 
 
 <!-- ```{r} -->
