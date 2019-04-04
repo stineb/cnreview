@@ -24,24 +24,25 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     out <- nsupply - ndemand
     return(out)
   }
-  
+
   ## to simplify life
   r_ntoc_plant <- 1/par$r_cton_plant
   r_ntoc_soil  <- 1/par$r_cton_soil
 
   ## initialise output variables
-  out_cplant_ag <- rep(NA, settings$ntsteps)
-  out_nplant_ag <- rep(NA, settings$ntsteps)
-  out_cplant_bg <- rep(NA, settings$ntsteps)
-  out_nplant_bg <- rep(NA, settings$ntsteps)
-  out_csoil     <- rep(NA, settings$ntsteps)
-  out_nsoil     <- rep(NA, settings$ntsteps)
-  out_clabl     <- rep(NA, settings$ntsteps)
-  out_nlabl     <- rep(NA, settings$ntsteps)
-  out_nloss     <- rep(NA, settings$ntsteps)
-  out_netmin    <- rep(NA, settings$ntsteps)
-  out_clitterfall <- rep(NA, settings$ntsteps)
-  out_nlitterfall <- rep(NA, settings$ntsteps)
+  ntout <- ifelse( settings$out_spinup, settings$spinupyears + settings$nyeartrend, settings$nyeartrend)
+  out_cplant_ag   <- c()
+  out_nplant_ag   <- c()
+  out_cplant_bg   <- c()
+  out_nplant_bg   <- c()
+  out_csoil       <- c()
+  out_nsoil       <- c()
+  out_clabl       <- c()
+  out_nlabl       <- c()
+  out_nloss       <- c()
+  out_netmin      <- c()
+  out_clitterfall <- c()
+  out_nlitterfall <- c()
   
   ## plant, aboveground, start with root:shoot ratio of 0.5
   cplant_ag <- ctot0 * 0.5
@@ -71,10 +72,27 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     }
   }
 
-  for (it in 1:settings$ntsteps){
+  spinup <- TRUE
+
+  ##----------------------------------------------BEGIN OF LOOP
+  itout <- 0
+  for (it in 1:(settings$spinupyears + settings$nyeartrend)){
     
-    # ## step increase in light use par$efficiency ~ CO2 fertilisation
-    # if (it==1000) lue <- 1.2 * lue
+    if (it==settings$spinupyears+1) spinup <- FALSE
+    if (settings$out_spinup){
+      itout <- itout + 1
+    } else {
+      if (!spinup) itout <- itout + 1
+    }
+
+    ## MANIPULATION ----------------
+    # if (it>(settings$spinupyears+100)) lue <- 1.1
+    ##------------------------------    
+    
+    itin <- max(it-settings$spinupyears, 1)
+    my_ppfd <- ifelse( length(ppfd) == settings$nyeartrend, ppfd[itin], ppfd[1] )
+    my_lue  <- ifelse( length(lue ) == settings$nyeartrend, lue[itin],  lue[1]  )
+    my_n_in <- ifelse( length(n_in) == settings$nyeartrend, n_in[itin], n_in[1] )
     
     ## Soil turnover
     csoil_turnover <- calc_turnover( csoil, par$tau_soil_c )
@@ -84,7 +102,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     nsoil          <- nsoil - nsoil_turnover
     
     ## Net mineralisation
-    netmin         <- nsoil_turnover + n_in
+    netmin         <- nsoil_turnover + my_n_in
     
     ## Plant turnover, needs to be after acquisition and before new balance evaluation
     ctot <- cplant_ag + cplant_bg + clabl
@@ -110,6 +128,11 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     
     csoil <- csoil + c_litterfall
     nsoil <- nsoil + n_litterfall
+
+    # if (spinup & accelerate & it == (settings$spinupyears-2700)){
+    #   csoil <- c_litterfall * par$tau_soil_c
+    #   nsoil <- n_litterfall * par$tau_soil_n
+    # }
     
     ## update total biomass with (allocatable) labile C and N 
     ctot <- cplant_ag + cplant_bg + clabl
@@ -131,21 +154,21 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       nplant_ag <- cplant_ag * r_ntoc_plant
       nplant_bg <- cplant_bg * r_ntoc_plant
       
-      clabl <- prod( aleaf, ppfd=ppfd, lue=lue, kl=par$kl ) #+clabl
+      clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
       nlabl <- r_ntoc_plant * clabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
       
     } else if (method=="scn") {
 
-      if (accelerate){
+      if (spinup & accelerate & it < (settings$spinupyears-2000) ){
         ## short-cut: by-passing soil
         #nlabl <- f_noloss( cplant_bg ) * r_ntoc_plant * (cplant_bg + cplant_ag) / tau_plant  #+ nlabl
-        netmin <- n_in + r_ntoc_plant * ctot / par$tau_plant
+        netmin <- my_n_in + (nplant_ag + nplant_bg) / par$tau_plant
       }
       
       root <- uniroot( 
         function(x) 
-          setzero_alpha( x, ctot, netmin, ppfd, lue, par$r_cton_plant, par$sla, par$kr, par$kl ), 
+          setzero_alpha( x, ctot, netmin, my_ppfd, my_lue, par$r_cton_plant, par$sla, par$kr, par$kl ), 
         interval=c(0,1) 
       )$root
     
@@ -160,30 +183,33 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       nplant_bg <- cplant_bg * r_ntoc_plant
       
       nlabl <- f_supply( cplant_bg, n0=netmin, kr=par$kr ) #+ nlabl
-      clabl <- prod( aleaf, ppfd=ppfd, lue=lue, kl=par$kl ) #+clabl
+      clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
       
     }
     
-    ## gater output variables
-    out_cplant_ag[it] <- cplant_ag
-    out_nplant_ag[it] <- nplant_ag
-    out_cplant_bg[it] <- cplant_bg
-    out_nplant_bg[it] <- nplant_bg
-    out_csoil[it]     <- csoil
-    out_nsoil[it]     <- nsoil
-    out_clabl[it]     <- clabl
-    out_nlabl[it]     <- nlabl
-    out_nloss[it]     <- netmin - nlabl
-    out_netmin[it]    <- netmin
-    out_clitterfall[it] <- c_litterfall
-    out_nlitterfall[it] <- n_litterfall
+    ## gather output variables
+    print(paste("itout: ", itout))
+    if ( itout > 0 ){
+      out_cplant_ag[itout] <- cplant_ag
+      out_nplant_ag[itout] <- nplant_ag
+      out_cplant_bg[itout] <- cplant_bg
+      out_nplant_bg[itout] <- nplant_bg
+      out_csoil[itout]     <- csoil
+      out_nsoil[itout]     <- nsoil
+      out_clabl[itout]     <- clabl
+      out_nlabl[itout]     <- nlabl
+      out_nloss[itout]     <- netmin - nlabl
+      out_netmin[itout]    <- netmin
+      out_clitterfall[itout] <- c_litterfall
+      out_nlitterfall[itout] <- n_litterfall
+    }
     
   }
   ##----------------------------------------------END OF LOOP
 
   df_out <- tibble(
-    simyear   = 1:settings$ntsteps,
+    simyear   = 1:ntout,
     cplant_ag = out_cplant_ag,
     nplant_ag = out_nplant_ag,
     cplant_bg = out_cplant_bg,
@@ -203,7 +229,11 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
 
 ## Simulation settings
 settings <- list(
-  ntsteps = 5000
+  # ntsteps = 5000
+  spinupyears = 3000,
+  nyeartrend  = 1000,
+  out_spinup  = FALSE,
+  yr_soileq   = 600
   )
 
 ## model parameters
@@ -223,93 +253,92 @@ par <- list(
 
 ## Environmental conditions
 ppfd <- 90
-lue  <- 1
+lue  <- rep(1, settings$nyeartrend); lue[101:settings$nyeartrend] <- 1.2
 n_in <- 0.8
 
 ## Run the model
 df_scn <- scn_model( ctot0=100, csoil0=100, 
                      ppfd=ppfd, lue=lue, n_in=n_in, 
-                     par=par, settings=settings, method="scn", accelerate=TRUE
+                     par=par, settings=settings, method="scn", accelerate=FALSE
                      )
+df_scn_acc <- scn_model(  ctot0=100, csoil0=100, 
+                          ppfd=ppfd, lue=lue, n_in=n_in, 
+                          par=par, settings=settings, method="scn", accelerate=TRUE
+                        )
 
 library(ggplot2)
 df_scn %>%
   tidyr::gather(varnam, value, c(cplant_ag, cplant_bg)) %>% 
   ggplot( aes(x=simyear, y=value, color=varnam)) +
   geom_line() +
-  labs(title="Plant C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")")))
+  labs(title="Plant C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
+  expand_limits(y=0)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=csoil) ) +
   geom_line() +
-  labs(title="Soil C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")")))
+  labs(title="Soil C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
+  expand_limits(y=0)
 
-df_scn %>% 
-  ggplot( aes(x=simyear, y=nsoil) ) +
-  geom_line() +
-  labs(title="Soil N", x="Simulation Year", y=expression(paste("N pool (g N m"^{-2}, ")")))
+gg <- ggplot() +
+  geom_line( data=df_scn, aes(x=simyear, y=nsoil) ) +
+  labs(title="Soil N", x="Simulation Year", y=expression(paste("N pool (g N m"^{-2}, ")"))) +
+  geom_line( data=df_scn_acc, aes(x=simyear, y=nsoil), linetype="dashed") +
+  geom_vline(xintercept = ifelse(settings$out_spinup, settings$spinupyears, 0), linetype="dotted") +
+  expand_limits(y=0)
+print(gg)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=clabl) ) +
   geom_line() +
-  labs(title="Labile C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")")))
+  labs(title="Labile C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
+  expand_limits(y=0)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=clabl/nlabl) ) +
   geom_line() +
   labs(title="Labile C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  geom_hline(yintercept=par$r_cton_plant, linetype="dotted")
+  geom_hline(yintercept=par$r_cton_plant, linetype="dotted") +
+  expand_limits(y=0)
 
 soil_cton_expected <- par$r_cton_plant * par$tau_soil_c / par$tau_soil_n
 df_scn %>% 
   ggplot( aes(x=simyear, y=csoil/nsoil) ) +
   geom_line() +
   labs(title="Soil C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  geom_hline(yintercept=soil_cton_expected, linetype="dotted")
+  geom_hline(yintercept=soil_cton_expected, linetype="dotted") +
+  expand_limits(y=0)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=c_litterfall/n_litterfall) ) +
   geom_line() +
   labs(title="Litterfall C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-  geom_hline(yintercept=par$r_cton_plant, linetype="dotted")
+  geom_hline(yintercept=par$r_cton_plant, linetype="dotted") +
+  expand_limits(y=0)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=(cplant_ag+cplant_bg)/(nplant_ag+nplant_bg)) ) +
   geom_line() +
-  labs(title="Plant C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")")))
+  labs(title="Plant C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
+  expand_limits(y=0)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=nloss) ) +
   geom_line() +
   labs(title="N losses", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_hline(yintercept = n_in, linetype="dotted")
+  geom_hline(yintercept = n_in, linetype="dotted") +
+  expand_limits(y=0)
 
+netmin_expected <- n_in + par$r_cton_plant^(-1) * (tail(df_scn$cplant_ag, 1) + tail(df_scn$cplant_bg, 1))/par$tau_plant
 df_scn %>% 
   ggplot( aes(x=simyear, y=netmin) ) +
   geom_line() +
-  labs(title="Net N mineralization", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")")))
+  labs(title="Net N mineralization", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
+  geom_hline(yintercept = netmin_expected, linetype="dotted") +
+  expand_limits(y=0)
 
 df_scn %>% 
   ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) +
   geom_line() +
-  labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)")
-
-
-# plot( 1:ntsteps, out_clabl, type = "l" )
-# plot( 1:ntsteps, out_nlabl, type = "l" )
-# plot( 1:ntsteps, out_cplant_ag/(out_cplant_bg+out_cplant_ag), type = "l" )
-
-# print("Steady state f_ag (fraction of aboveground to total plant C):")
-# print( out_cplant_ag[ntsteps]/(cplant_bg[ntsteps]+cplant_ag[ntsteps]) )
-
-# print("Steady state total plant C:")
-# print( cplant_bg[ntsteps]+cplant_ag[ntsteps] )
-
-# print("Steady state net mineralisation:")
-# print( netmin )
-
-# print("Expected steady state net mineralisation:")
-# print( n_in + (nplant_ag + nplant_bg) / par$tau_plant )
-# # print( calc_turnover( nsoil, par$tau_soil_n ))
-# print( (cplant_ag + cplant_bg) / (par$r_cton_plant * par$tau_plant) + n_in )
-
+  labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)") +
+  expand_limits(y=0)
