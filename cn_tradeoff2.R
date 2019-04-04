@@ -1,4 +1,4 @@
-scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="scn" ){
+scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="scn", accelerate=FALSE ){
 
   f_supply <- function( cbg, n0, f_unavoidable=0.0, kr ){
     (1.0 - f_unavoidable) * n0 * cbg / (cbg + kr )
@@ -64,6 +64,12 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     c0 * (1.0 - exp(-1/tau * dt ) )
     # c0/tau
   }
+  
+  if (method=="conly"){
+    if (par$tau_plant^-1*par$kl>par$alpha_fix*par$sla*ppfd*lue){
+      print("WARNING: PLANT WILL DIE.")
+    }
+  }
 
   for (it in 1:settings$ntsteps){
     
@@ -100,7 +106,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     c_litterfall <- cturnover_ag + cturnover_bg
     n_litterfall <- nturnover_ag + nturnover_bg
     
-    print(paste("C:N of litterfall", c_litterfall/n_litterfall))
+    # print(paste("C:N of litterfall", c_litterfall/n_litterfall))
     
     csoil <- csoil + c_litterfall
     nsoil <- nsoil + n_litterfall
@@ -113,7 +119,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     ## Get balanced allocation
     if (method=="conly"){
       
-      root <- 0.5
+      root <- par$alpha_fix
 
       ## redesign the plant (immediate par$effect assumption)
       clabl <- 0
@@ -130,6 +136,12 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
       
     } else if (method=="scn") {
+
+      if (accelerate){
+        ## short-cut: by-passing soil
+        #nlabl <- f_noloss( cplant_bg ) * r_ntoc_plant * (cplant_bg + cplant_ag) / tau_plant  #+ nlabl
+        netmin <- n_in + r_ntoc_plant * ctot / par$tau_plant
+      }
       
       root <- uniroot( 
         function(x) 
@@ -205,18 +217,19 @@ par <- list(
   sla          = 0.1,
   eff          = 1.0,
   kl           = 50,
-  kr           = 50
+  kr           = 80,
+  alpha_fix    = 0.6    # only used for "conly" method
 )
 
 ## Environmental conditions
-ppfd <- 100
+ppfd <- 90
 lue  <- 1
-n_in <- 0.3
+n_in <- 0.8
 
 ## Run the model
-df_scn <- scn_model( ctot0=10, csoil0=100, 
+df_scn <- scn_model( ctot0=100, csoil0=100, 
                      ppfd=ppfd, lue=lue, n_in=n_in, 
-                     par=par, settings=settings, method="conly" 
+                     par=par, settings=settings, method="scn", accelerate=TRUE
                      )
 
 library(ggplot2)
@@ -269,7 +282,18 @@ df_scn %>%
   ggplot( aes(x=simyear, y=nloss) ) +
   geom_line() +
   labs(title="N losses", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_hline(yintercept = n_in, linetype="dashed")
+  geom_hline(yintercept = n_in, linetype="dotted")
+
+df_scn %>% 
+  ggplot( aes(x=simyear, y=netmin) ) +
+  geom_line() +
+  labs(title="Net N mineralization", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")")))
+
+df_scn %>% 
+  ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) +
+  geom_line() +
+  labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)")
+
 
 # plot( 1:ntsteps, out_clabl, type = "l" )
 # plot( 1:ntsteps, out_nlabl, type = "l" )
