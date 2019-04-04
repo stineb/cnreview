@@ -42,6 +42,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
   out_nloss       <- c()
   out_netmin      <- c()
   out_nup         <- c()
+  out_npp         <- c()
   out_clitterfall <- c()
   out_nlitterfall <- c()
   
@@ -203,6 +204,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       out_nloss[itout]       <- netmin - nlabl
       out_netmin[itout]      <- netmin
       out_nup[itout]         <- nlabl
+      out_npp[itout]         <- clabl
       out_clitterfall[itout] <- c_litterfall
       out_nlitterfall[itout] <- n_litterfall
     }
@@ -223,6 +225,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     nloss        = out_nloss,
     netmin       = out_netmin,
     nup          = out_nup,
+    npp          = out_npp,
     c_litterfall = out_clitterfall,
     n_litterfall = out_nlitterfall
   )
