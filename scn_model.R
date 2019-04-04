@@ -1,7 +1,7 @@
 scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="scn", accelerate=FALSE ){
 
-  f_supply <- function( cbg, n0, f_unavoidable=0.0, kr ){
-    (1.0 - f_unavoidable) * n0 * cbg / (cbg + kr )
+  f_supply <- function( cbg, n0, f_unavoid, kr ){
+    (1.0 - f_unavoid) * n0 * cbg / (cbg + kr )
   }
   prod <- function(leafarea, ppfd, lue, kl ){
     ppfd * lue * leafarea / (leafarea + kl )
@@ -18,8 +18,8 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
     (1-alpha) * ctot
   }
   
-  setzero_alpha <- function(alpha, ctot, n0, ppfd, lue, r_cton_plant, sla, kr, kl){
-    nsupply <- f_supply(  calc_cbg_alpha(      alpha, ctot ), n0=n0, kr=kr )
+  setzero_alpha <- function(alpha, ctot, n0, ppfd, lue, r_cton_plant, sla, kr, kl, f_unavoid ){
+    nsupply <- f_supply(  calc_cbg_alpha(      alpha, ctot ), n0=n0, f_unavoid = f_unavoid, kr=kr )
     ndemand <- f_ndemand( calc_leafarea_alpha( alpha, ctot, sla ), ppfd=ppfd, lue=lue, r_cton_plant=r_cton_plant, kl=kl )
     out <- nsupply - ndemand
     return(out)
@@ -170,7 +170,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       
       root <- uniroot( 
         function(x) 
-          setzero_alpha( x, ctot, netmin, my_ppfd, my_lue, par$r_cton_plant, par$sla, par$kr, par$kl ), 
+          setzero_alpha( x, ctot, netmin, my_ppfd, my_lue, par$r_cton_plant, par$sla, par$kr, par$kl, par$f_unavoid ), 
         interval=c(0,1) 
       )$root
     
@@ -184,7 +184,7 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       nplant_ag <- cplant_ag * r_ntoc_plant
       nplant_bg <- cplant_bg * r_ntoc_plant
       
-      nlabl <- f_supply( cplant_bg, n0=netmin, kr=par$kr ) #+ nlabl
+      nlabl <- f_supply( cplant_bg, n0=netmin, kr=par$kr, f_unavoid = par$f_unavoid ) #+ nlabl
       clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
       

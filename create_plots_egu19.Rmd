@@ -48,7 +48,8 @@ par <- list(
   eff          = 1.0,
   kl           = 50,
   kr           = 80,
-  alpha_fix    = 0.6    # only used for "conly" method
+  alpha_fix    = 0.6,    # only used for "conly" method
+  f_unavoid    = 0.0
 )
 ```
 
@@ -61,17 +62,23 @@ n_in <- 0.8
 n_in_manip <- rep(0.8, settings$nyeartrend); n_in_manip[101:settings$nyeartrend] <- 0.9
 ```
 
-### Model run
+### Model runs
 ```{r}
 ## N fertilisation run
-df_scn_fert <- scn_model( ctot0=100, csoil0=100, 
+df_scn_f <- scn_model( ctot0=100, csoil0=100, 
                      ppfd=ppfd, lue=lue, n_in=n_in_manip, 
                      par=par, settings=settings, method="scn", accelerate=FALSE
                      )
 
-## "CO2" run
-df_scn_co2 <- scn_model( ctot0=100, csoil0=100, 
+## "CO2" run (ambient N)
+df_scn_c <- scn_model( ctot0=100, csoil0=100, 
                      ppfd=ppfd, lue=lue_manip, n_in=n_in, 
+                     par=par, settings=settings, method="scn", accelerate=FALSE
+                     )
+
+## "CO2" run at high N
+df_scn_cf <- scn_model( ctot0=100, csoil0=100, 
+                     ppfd=ppfd, lue=lue_manip, n_in=0.9, 
                      par=par, settings=settings, method="scn", accelerate=FALSE
                      )
 
@@ -80,9 +87,18 @@ par_slow <- par
 par_slow$tau_soil_c <- par$tau_soil_c * 5
 par_slow$tau_soil_n <- par$tau_soil_n * 5
 
-df_scn_co2_slow <- scn_model( ctot0=100, csoil0=100, 
+df_scn_c_slow <- scn_model( ctot0=100, csoil0=100, 
                      ppfd=ppfd, lue=lue_manip, n_in=n_in, 
                      par=par_slow, settings=settings, method="scn", accelerate=FALSE
+                     )
+
+## CO2 run with slow decomposition rate
+par_unavoid <- par
+par_unavoid$f_unavoid <- 0.2
+
+df_scn_c_unavoid <- scn_model( ctot0=100, csoil0=100, 
+                     ppfd=ppfd, lue=lue_manip, n_in=n_in, 
+                     par=par_unavoid, settings=settings, method="scn", accelerate=FALSE
                      )
 
 # df_scn_acc <- scn_model(  ctot0=100, csoil0=100, 
@@ -97,7 +113,7 @@ df_scn_co2_slow <- scn_model( ctot0=100, csoil0=100,
 
 ```{r}
 library(ggplot2)
-ggplot( data = df_scn_fert, aes(x=simyear, y=cplant_ag)) +
+ggplot( data = df_scn_f, aes(x=simyear, y=cplant_ag)) +
   geom_line( size=1 ) +
   labs(title="Aboveground plant C", 
        x="Simulation Year", 
@@ -107,7 +123,7 @@ ggplot( data = df_scn_fert, aes(x=simyear, y=cplant_ag)) +
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("abgm_nfert.pdf", width=4, height=3)
 
-df_scn_fert %>% 
+df_scn_f %>% 
   rowwise() %>% 
   mutate( ndemand = npp / par$r_cton_plant ) %>% 
   select(simyear, ndemand, nup) %>% 
@@ -126,7 +142,7 @@ ggsave("n_supply_demand_nfert.pdf", width=4, height=3)
 #### Elevated CO2
 
 ```{r}
-ggplot( data = df_scn_co2, aes(x=simyear, y=cplant_ag)) +
+ggplot( data = df_scn_c, aes(x=simyear, y=cplant_ag)) +
   geom_line( size=1 ) +
   labs(title="Aboveground plant C", 
        x="Simulation Year", 
@@ -136,7 +152,7 @@ ggplot( data = df_scn_co2, aes(x=simyear, y=cplant_ag)) +
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("abgm_co2.pdf", width=4, height=3)
 
-ggplot( data = df_scn_co2, aes(x=simyear, y=nup)) +
+ggplot( data = df_scn_c, aes(x=simyear, y=nup)) +
   geom_line( size=1 ) +
   labs(title="N uptake", 
        x="Simulation Year", 
@@ -146,7 +162,7 @@ ggplot( data = df_scn_co2, aes(x=simyear, y=nup)) +
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("nup_co2.pdf", width=4, height=3)
 
-ggplot( data = df_scn_co2, aes(x=simyear, y=cplant_bg/nup)) +
+ggplot( data = df_scn_c, aes(x=simyear, y=cplant_bg/nup)) +
   geom_line( size=1 ) +
   labs(title="N cost", 
        x="Simulation Year", 
@@ -160,9 +176,9 @@ ggsave("ncost_co2.pdf", width=4, height=3)
 #### Slow decomposition rate
 
 ```{r}
-df_scn_co2 %>% 
+df_scn_c %>% 
   select(simyear, cplant_ag) %>% 
-  left_join( select( df_scn_co2_slow, simyear, cplant_ag_slow=cplant_ag ), by="simyear" ) %>%
+  left_join( select( df_scn_c_slow, simyear, cplant_ag_slow=cplant_ag ), by="simyear" ) %>%
   tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_slow)) %>% 
   ggplot( aes(x=simyear, y=value, color=varnam)) +
   geom_line( size=1 ) +
@@ -176,90 +192,153 @@ df_scn_co2 %>%
 ggsave("abgm_co2_slow.pdf", width=4, height=3)
 ```
 
-
+#### N losses
 ```{r}
-df_scn %>%
-  tidyr::gather(varnam, value, c(cplant_ag, cplant_bg)) %>% 
-  ggplot( aes(x=simyear, y=value, color=varnam)) +
-  geom_line() +
-  labs(title="Plant C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
+df_scn_c %>%
+  select(simyear, nloss_c=nloss) %>% 
+  left_join( select(df_scn_cf, simyear, nloss_cf=nloss), by="simyear") %>% 
+  tidyr::gather( varnam, value, c(nloss_c, nloss_cf)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam) ) +
+  geom_line(size=1) +
+  labs(title="N losses", 
+       x="Simulation Year", 
+       y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  geom_hline(yintercept = c(n_in, 0.9), linetype="dotted") +
+  scale_color_discrete(
+    name="", 
+    breaks=c("nloss_c", "nloss_cf"), 
+    labels=c("Low N", "High N"))+
   expand_limits(y=0)
+ggsave("nloss_co2_nhilo.pdf", width=4, height=3)
 
-df_scn %>% 
-  ggplot( aes(x=simyear, y=nloss) ) +
-  geom_line() +
-  labs(title="N losses", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_hline(yintercept = n_in, linetype="dotted") +
+## CO2 effect on biomass
+df_scn_c %>%
+  select(simyear, cplant_ag_c=cplant_ag) %>% 
+  left_join( select(df_scn_cf, simyear, cplant_ag_cf=cplant_ag), by="simyear") %>% 
+  mutate( cplant_ag_cf = cplant_ag_cf/cplant_ag_cf[1], 
+          cplant_ag_c  = cplant_ag_c /cplant_ag_c[1] ) %>% 
+  tidyr::gather( varnam, value, c(cplant_ag_c, cplant_ag_cf)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam) ) +
+  geom_line(size=1) +
+  labs(title="Aboveground plant C", 
+       x="Simulation Year", 
+       y=expression(paste("Response ratio (unitless)")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  geom_vline(xintercept = 100, linetype="dotted") +
+  scale_color_discrete(
+    name="", 
+    breaks=c("cplant_ag_c", "cplant_ag_cf"), 
+    labels=c("Low N", "High N"))+
   expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) +
-  geom_line() +
-  labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)") +
-  expand_limits(y=0)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=csoil) ) +
-  geom_line() +
-  labs(title="Soil C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
-  expand_limits(y=0)
-
-gg <- ggplot() +
-  geom_line( data=df_scn, aes(x=simyear, y=nsoil) ) +
-  labs(title="Soil N", x="Simulation Year", y=expression(paste("N pool (g N m"^{-2}, ")"))) +
-  geom_line( data=df_scn_acc, aes(x=simyear, y=nsoil), linetype="dashed") +
-  geom_vline(xintercept = ifelse(settings$out_spinup, settings$spinupyears, 0), linetype="dotted") +
-  expand_limits(y=0)
-print(gg)
-
-gg <- ggplot() +
-  geom_line( data=df_scn, aes(x=simyear, y=nup) ) +
-  labs(title="N uptake", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_vline(xintercept = ifelse(settings$out_spinup, settings$spinupyears, 0), linetype="dotted") +
-  expand_limits(y=0)
-print(gg)
-
-df_scn %>% 
-  ggplot( aes(x=simyear, y=clabl) ) +
-  geom_line() +
-  labs(title="Labile C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) +
-  expand_limits(y=0)
-
-# df_scn %>% 
-#   ggplot( aes(x=simyear, y=clabl/nlabl) ) +
-#   geom_line() +
-#   labs(title="Labile C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-#   geom_hline(yintercept=par$r_cton_plant, linetype="dotted") +
-#   expand_limits(y=0)
-# 
-# soil_cton_expected <- par$r_cton_plant * par$tau_soil_c / par$tau_soil_n
-# df_scn %>% 
-#   ggplot( aes(x=simyear, y=csoil/nsoil) ) +
-#   geom_line() +
-#   labs(title="Soil C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-#   geom_hline(yintercept=soil_cton_expected, linetype="dotted") +
-#   expand_limits(y=0)
-# 
-# df_scn %>% 
-#   ggplot( aes(x=simyear, y=c_litterfall/n_litterfall) ) +
-#   geom_line() +
-#   labs(title="Litterfall C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-#   geom_hline(yintercept=par$r_cton_plant, linetype="dotted") +
-#   expand_limits(y=0)
-# 
-# df_scn %>% 
-#   ggplot( aes(x=simyear, y=(cplant_ag+cplant_bg)/(nplant_ag+nplant_bg)) ) +
-#   geom_line() +
-#   labs(title="Plant C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) +
-#   expand_limits(y=0)
-
-
-netmin_expected <- n_in + par$r_cton_plant^(-1) * (tail(df_scn$cplant_ag, 1) + tail(df_scn$cplant_bg, 1))/par$tau_plant
-df_scn %>% 
-  ggplot( aes(x=simyear, y=netmin) ) +
-  geom_line() +
-  labs(title="Net N mineralization", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) +
-  geom_hline(yintercept = netmin_expected, linetype="dotted") +
-  expand_limits(y=0)
+ggsave("cplant_ag_co2_nhilo.pdf", width=5, height=3)
 
 ```
+
+#### Unavoidable N losses
+```{r}
+df_scn_c %>%
+  select(simyear, cplant_ag=cplant_ag) %>% 
+  left_join( select(df_scn_c_unavoid, simyear, cplant_ag_unavoid=cplant_ag), by="simyear") %>% 
+  mutate( cplant_ag = cplant_ag/cplant_ag[1], 
+          cplant_ag_unavoid  = cplant_ag_unavoid /cplant_ag_unavoid[1] ) %>% 
+  tidyr::gather( varnam, value, c(cplant_ag, cplant_ag_unavoid)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam) ) +
+  geom_line(size=1) +
+  labs(title="Aboveground plant C", 
+       x="Simulation Year", 
+       y=expression(paste("Response ratio (unitless)")),
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  geom_vline(xintercept = 100, linetype="dotted") +
+  scale_color_discrete(
+    name="", 
+    breaks=c("cplant_ag", "cplant_ag_unavoid"), 
+    labels=c("No unavoidable losses", "With unavoidable losses"))+
+  expand_limits(y=0)
+ggsave("cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
+```
+
+
+
+
+
+<!-- ```{r} -->
+<!-- df_scn %>% -->
+<!--   tidyr::gather(varnam, value, c(cplant_ag, cplant_bg)) %>%  -->
+<!--   ggplot( aes(x=simyear, y=value, color=varnam)) + -->
+<!--   geom_line() + -->
+<!--   labs(title="Plant C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) + -->
+<!--   expand_limits(y=0) -->
+
+
+<!-- df_scn %>%  -->
+<!--   ggplot( aes(x=simyear, y=cplant_bg/cplant_ag) ) + -->
+<!--   geom_line() + -->
+<!--   labs(title="Root:shoot ratio", x="Simulation Year", y="ratio (unitless)") + -->
+<!--   expand_limits(y=0) -->
+
+<!-- df_scn %>%  -->
+<!--   ggplot( aes(x=simyear, y=csoil) ) + -->
+<!--   geom_line() + -->
+<!--   labs(title="Soil C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) + -->
+<!--   expand_limits(y=0) -->
+
+<!-- gg <- ggplot() + -->
+<!--   geom_line( data=df_scn, aes(x=simyear, y=nsoil) ) + -->
+<!--   labs(title="Soil N", x="Simulation Year", y=expression(paste("N pool (g N m"^{-2}, ")"))) + -->
+<!--   geom_line( data=df_scn_acc, aes(x=simyear, y=nsoil), linetype="dashed") + -->
+<!--   geom_vline(xintercept = ifelse(settings$out_spinup, settings$spinupyears, 0), linetype="dotted") + -->
+<!--   expand_limits(y=0) -->
+<!-- print(gg) -->
+
+<!-- gg <- ggplot() + -->
+<!--   geom_line( data=df_scn, aes(x=simyear, y=nup) ) + -->
+<!--   labs(title="N uptake", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) + -->
+<!--   geom_vline(xintercept = ifelse(settings$out_spinup, settings$spinupyears, 0), linetype="dotted") + -->
+<!--   expand_limits(y=0) -->
+<!-- print(gg) -->
+
+<!-- df_scn %>%  -->
+<!--   ggplot( aes(x=simyear, y=clabl) ) + -->
+<!--   geom_line() + -->
+<!--   labs(title="Labile C", x="Simulation Year", y=expression(paste("C pool (g C m"^{-2}, ")"))) + -->
+<!--   expand_limits(y=0) -->
+
+<!-- # df_scn %>%  -->
+<!-- #   ggplot( aes(x=simyear, y=clabl/nlabl) ) + -->
+<!-- #   geom_line() + -->
+<!-- #   labs(title="Labile C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) + -->
+<!-- #   geom_hline(yintercept=par$r_cton_plant, linetype="dotted") + -->
+<!-- #   expand_limits(y=0) -->
+<!-- #  -->
+<!-- # soil_cton_expected <- par$r_cton_plant * par$tau_soil_c / par$tau_soil_n -->
+<!-- # df_scn %>%  -->
+<!-- #   ggplot( aes(x=simyear, y=csoil/nsoil) ) + -->
+<!-- #   geom_line() + -->
+<!-- #   labs(title="Soil C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) + -->
+<!-- #   geom_hline(yintercept=soil_cton_expected, linetype="dotted") + -->
+<!-- #   expand_limits(y=0) -->
+<!-- #  -->
+<!-- # df_scn %>%  -->
+<!-- #   ggplot( aes(x=simyear, y=c_litterfall/n_litterfall) ) + -->
+<!-- #   geom_line() + -->
+<!-- #   labs(title="Litterfall C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) + -->
+<!-- #   geom_hline(yintercept=par$r_cton_plant, linetype="dotted") + -->
+<!-- #   expand_limits(y=0) -->
+<!-- #  -->
+<!-- # df_scn %>%  -->
+<!-- #   ggplot( aes(x=simyear, y=(cplant_ag+cplant_bg)/(nplant_ag+nplant_bg)) ) + -->
+<!-- #   geom_line() + -->
+<!-- #   labs(title="Plant C:N", x="Simulation Year", y=expression(paste("C:N ratio (g C g N"^{-1}, ")"))) + -->
+<!-- #   expand_limits(y=0) -->
+
+
+<!-- netmin_expected <- n_in + par$r_cton_plant^(-1) * (tail(df_scn$cplant_ag, 1) + tail(df_scn$cplant_bg, 1))/par$tau_plant -->
+<!-- df_scn %>%  -->
+<!--   ggplot( aes(x=simyear, y=netmin) ) + -->
+<!--   geom_line() + -->
+<!--   labs(title="Net N mineralization", x="Simulation Year", y=expression(paste("N flux (g N m"^{-2}, " yr"^{-1}, ")"))) + -->
+<!--   geom_hline(yintercept = netmin_expected, linetype="dotted") + -->
+<!--   expand_limits(y=0) -->
+
+<!-- ``` -->
