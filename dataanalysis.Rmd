@@ -1083,9 +1083,15 @@ df_c_agg %>%
   geom_jitter( color = rgb(0,0,0,0.3), aes( size = 1/logr_se ), position = position_jitter(w = 0.2, h = 0) ) +
   geom_crossbar( data = df_metabox, aes(x=my_lab, y=middle, ymin=ymin, ymax=ymax), fill = "grey80", alpha = 0.6, width = 0.5 ) +
   geom_hline( yintercept=0.0, size=0.5 ) +
-  labs(x="", y="Log Response Ratio", size="1/SE") +
+  labs(x="", y="Log Response Ratio", size=expression(paste("Error"^{-1}))) +
   coord_flip() +
   ylim(-1,1) 
+ggsave("fig/meta_myboxes.pdf", width=6, height=4)
+```
+
+Number of data points (plot-level measurements) per variable:
+```{r}
+df_c_agg %>% group_by(my_lab) %>% summarise(n_plots=sum(n_plots)) %>% knitr::kable()
 ```
 
 ## Forest plots
@@ -1133,9 +1139,11 @@ df_c_anpp_bnpp %>%
   xlim(0, 0.8) + ylim(0, 0.8) +
   geom_abline() + 
   ggrepel::geom_text_repel(size=3, point.padding = 0.5, segment.alpha = 0) +
-  labs(x="Log Response Ratio of ANPP", y="Log Response Ratio of BNPP", size="1/SE")
+  labs(x="Log Response Ratio of ANPP", y="Log Response Ratio of BNPP", size=expression(paste("Error"^{-1})))
   # geom_errorbar(aes(ymin=BNPP-seBNPP, ymax=BNPP+seBNPP)) +
   # geom_errorbarh(aes(xmin=ANPP-seANPP, xmax=ANPP+seANPP))
+
+ggsave("fig/meta_coupling_anpp_bnpp.pdf", width=6, height=4)
 ```
 
 <!-- **Issue:** -->

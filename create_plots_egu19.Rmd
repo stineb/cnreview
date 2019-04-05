@@ -29,11 +29,11 @@ knitr::opts_chunk$set(echo = TRUE)
 ### Simulation settings.
 ```{r}
 settings <- list(
-  # ntsteps = 5000
-  spinupyears = 3000,
-  nyeartrend  = 750,
-  out_spinup  = FALSE,
-  yr_soileq   = 600
+  spinupyears     = 3000,
+  nyeartrend      = 750,
+  out_spinup      = FALSE,
+  yr_soileq       = 600,
+  helpgrow_spinup = TRUE
   )
 ```
 
@@ -51,7 +51,7 @@ par <- list(
   eff          = 1.0,
   kl           = 50,
   kr           = 80,
-  alpha_fix    = 0.6,    # only used for "conly" method
+  alpha_fix    = 1/(1+0.47),    # only used for "conly" method
   f_unavoid    = 0.0
 )
 ```
@@ -117,11 +117,16 @@ df_sconly <- scn_model( ctot0=100, csoil0=100,
                      )
 
 ## "CO2" run (ambient N) with "Liebig model"
-par_liebig <- par
-par_liebig$alpha_fix <- 0.7
-df_scn_c_nmin_liebig <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
+## limited by all N min (uptake not related to root mass)
+df_scn_c_nmin_liebig_allnmin <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
                      ppfd=ppfd, lue=lue_manip, n_in=n_in, 
-                     par=par_liebig, settings=settings, method="minimum", accelerate=FALSE
+                     par=par_liebig, settings=settings, method="minimum_allnmin", accelerate=FALSE
+                     )
+
+## limited by root-mass restricted available N min
+df_scn_c_nmin_liebig_restrictednmin <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
+                     ppfd=ppfd, lue=lue_manip, n_in=n_in, 
+                     par=par_liebig, settings=settings, method="minimum_restrictednmin", accelerate=FALSE
                      )
 
 ## "CO2" run (ambient N) with model with explicity mineral N pool
@@ -324,7 +329,7 @@ ggsave("fig/cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
 ```{r}
 df_sconly %>% 
   select(simyear, cplant_ag_conly=cplant_ag) %>% 
-  left_join( select( df_scn_c_nmin_liebig, simyear, cplant_ag_liebig=cplant_ag ), by="simyear" ) %>%
+  left_join( select( df_scn_c_nmin_liebig_allnmin, simyear, cplant_ag_liebig=cplant_ag ), by="simyear" ) %>%
   tidyr::gather(varnam, value, c(cplant_ag_conly, cplant_ag_liebig)) %>% 
   ggplot( aes(x=simyear, y=value, color=varnam)) +
   geom_line( size=1, aes(linetype=varnam) ) +
@@ -344,8 +349,9 @@ ggsave("fig/abgm_co2_liebig_conly.pdf", width=4, height=3)
 ```{r}
 df_scn_c_nmin %>% 
   select(simyear, cplant_ag) %>% 
-  left_join( select( df_scn_c_nmin_liebig, simyear, cplant_ag_liebig=cplant_ag ), by="simyear" ) %>%
-  tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_liebig)) %>% 
+  left_join( select( df_scn_c_nmin_liebig_allnmin, simyear, cplant_ag_liebig_allnmin=cplant_ag ), by="simyear" ) %>%
+  left_join( select( df_scn_c_nmin_liebig_restrictednmin, simyear, cplant_ag_liebig_restrictednmin=cplant_ag ), by="simyear" ) %>%
+  tidyr::gather(varnam, value, c(cplant_ag, cplant_ag_liebig_allnmin, cplant_ag_liebig_restrictednmin)) %>% 
   ggplot( aes(x=simyear, y=value, color=varnam)) +
   geom_line( size=1 ) +
   labs(title="Aboveground plant C", 
@@ -354,10 +360,13 @@ df_scn_c_nmin %>%
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted") +
-  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_liebig"), labels=c("sCN model", "Liebig model"))
+  scale_color_discrete(
+    name="", 
+    breaks=c("cplant_ag", "cplant_ag_liebig_allnmin", "cplant_ag_liebig_restrictednmin"), 
+    labels=c("sCN model", "Liebig model (all Nmin)", "Liebig model (restricted Nmin)"))
 ggsave("fig/abgm_co2_liebig.pdf", width=4, height=3)
 
-df_scn_c_nmin_liebig %>%
+df_scn_c_nmin_liebig_allnmin %>%
   ggplot( aes(x=simyear, y=overspill) ) +
   geom_line(size=1) +
   labs(
@@ -367,6 +376,30 @@ df_scn_c_nmin_liebig %>%
     subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   geom_vline(xintercept = 100, linetype="dotted")
 ggsave("fig/overspill_c_liebig.pdf", width=4, height=3)
+
+df_scn_c_nmin %>% 
+  select(simyear, nmin) %>% 
+  left_join( select( df_scn_c_nmin_liebig_allnmin, simyear, nmin_liebig_allnmin=nmin ), by="simyear" ) %>%
+  left_join( select( df_scn_c_nmin_liebig_restrictednmin, simyear, nmin_liebig_restrictednmin=cplant_ag ), by="simyear" ) %>%
+  mutate(
+    nmin=nmin/nmin[1], 
+    nmin_liebig_allnmin=nmin_liebig_allnmin/nmin_liebig_allnmin[1],
+    nmin_liebig_restrictednmin=nmin_liebig_restrictednmin/nmin_liebig_restrictednmin[1]
+    ) %>% 
+  tidyr::gather(varnam, value, c(nmin, nmin_liebig_allnmin, nmin_liebig_restrictednmin)) %>% 
+  ggplot( aes(x=simyear, y=value, color=varnam)) +
+  geom_line( size=1 ) +
+  labs(title="Soil mineral N", 
+       x="Simulation Year", 
+       y="Response ratio (unitless)",
+       subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  expand_limits(y=0) +
+  geom_vline(xintercept = 100, linetype="dotted") +
+  scale_color_discrete(
+    name="", 
+    breaks=c("nmin", "nmin_liebig_allnmin", "nmin_liebig_allnmin"), 
+    labels=c("sCN model", "Liebig model (all Nmin)", "Liebig model (restricted Nmin)"))
+ggsave("fig/nmin_co2_liebig.pdf", width=4, height=3)
 ```
 
 #### Explicity mineral N pool

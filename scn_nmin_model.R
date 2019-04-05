@@ -158,8 +158,15 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
     ntot <- nplant_ag + nplant_bg + nlabl
     # print( paste( "C:N ratio of plant after turnover:", ctot/ntot ) )
     
+    ## do flexible growth for all methods to support growth (so that it gets off zero)
+    if (spinup & settings$helpgrow_spinup & it < (settings$spinupyears-2000) ){
+      use_method <- "scn"
+    } else {
+      use_method <- method
+    }
+
     ## Get balanced allocation
-    if (method=="conly"){
+    if (use_method=="conly"){
       
       ## use prescribed allocation fraction
       root <- par$alpha_fix
@@ -179,8 +186,10 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
       ## Assume N required (~clabl) is automatically matched by N supply, irrespective of belowground C
       nlabl <- r_ntoc_plant * clabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
+
+      clabl_overspill <- 0
       
-    } else if (method=="scn") {
+    } else if (use_method=="scn") {
 
       if (spinup & accelerate & it < (settings$spinupyears-2000) ){
         ## short-cut: by-passing soil
@@ -193,6 +202,9 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
           setzero_alpha( x, ctot, nmin, my_ppfd, my_lue, par$r_cton_plant, par$sla, par$kr, par$kl, par$f_unavoid ), 
         interval=c(0,1) 
       )$root
+
+      ## save optimal allocation for next time step, relevant for minimum model
+      root_save <- root
     
       ## redesign the plant (immediate par$effect assumption)
       clabl <- 0
@@ -204,16 +216,19 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
       nplant_ag <- cplant_ag * r_ntoc_plant
       nplant_bg <- cplant_bg * r_ntoc_plant
       
-      nlabl <- f_supply( cplant_bg, n0=nmin, kr=par$kr, f_unavoid = par$f_unavoid ) #+ nlabl
       clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
+      nlabl <- f_supply( cplant_bg, n0=nmin, kr=par$kr, f_unavoid = par$f_unavoid ) #+ nlabl
       # print( paste( "C:N ratio of labile:", clabl/nlabl ) )
+
+      clabl_overspill <- 0
 
       nmin <- nmin - nlabl
       
-    } else if (method=="minimum"){
+    } else if (use_method=="minimum_allnmin" || use_method=="minimum_restrictednmin"){
 
       ## use prescribed allocation fraction
-      root <- par$alpha_fix
+      # root <- par$alpha_fix
+      root <- root_save
 
       ## redesign the plant (immediate par$effect assumption)
       clabl <- 0
@@ -232,9 +247,21 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
 
       ## Take minimum of supply and demand
       nreq <- par$eff * clabl * r_ntoc_plant
-      nlabl <- min(nlabl, nreq)
-      clabl <- nlabl * par$r_cton_plant
 
+      if (use_method=="minimum_restrictednmin"){
+
+        ## OPTION 1: acquisition is limited by the actual root mass-dependent uptake ==> no more stimulation by CO2 possible
+        nlabl <- min(nlabl, nreq)
+
+      } else if (use_method=="minimum_allnmin"){
+
+        ## OPTION 2: acquisition is limited by what's available (total nmin pool) ==> essentially imposes no limitation
+        nlabl <- min(nmin, nreq)
+
+      }
+
+      ## Reduce allocatable C and put rest to "overspill respiration"
+      clabl <- nlabl * par$r_cton_plant
       clabl_overspill <- clabl_avl - clabl
 
       ## Reduce mineral N pool
