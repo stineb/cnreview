@@ -1091,7 +1091,11 @@ ggsave("fig/meta_myboxes.pdf", width=6, height=4)
 
 Number of data points (plot-level measurements) per variable:
 ```{r}
-df_c_agg %>% group_by(my_lab) %>% summarise(n_plots=sum(n_plots)) %>% knitr::kable()
+df_c_agg %>% 
+  group_by(my_lab) %>% 
+  summarise(n_plots=sum(n_plots), n_exp=n()) %>% 
+  rename_("Variable"="my_lab", "N plots"="n_plots", "N experiments"="n_exp") %>% 
+  knitr::kable()
 ```
 
 ## Forest plots
