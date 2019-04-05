@@ -217,6 +217,14 @@ scn_model <- function( ctot0, csoil0, ppfd, lue, n_in, par, settings, method="sc
       clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
       nlabl <- f_supply( cplant_bg, n0=netmin, kr=par$kr, f_unavoid = par$f_unavoid ) #+ nlabl
 
+      ## Take minimum of supply and demand
+      nreq <- par$eff * clabl * r_ntoc_plant
+      nlabl <- min(nlabl, nreq)
+      clabl <- nlabl * par$r_cton_plant
+
+      ## Reduce mineral N pool
+      nmin <- nmin - nlabl
+      
     } else {
       rlang::abort("Specify a valid method (argument to scn_model().")
     }

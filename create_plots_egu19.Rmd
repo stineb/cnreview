@@ -108,15 +108,15 @@ df_scn_c_unavoid <- scn_model( ctot0=100, csoil0=100,
                      par=par_unavoid, settings=settings, method="scn", accelerate=FALSE
                      )
 
-## "CO2" run (ambient N) with "minimum model"
+## "CO2" run (ambient N) in C-only setup
 par_liebig <- par
 par_liebig$alpha_fix <- 0.7
-df_sc_liebig <- scn_model( ctot0=100, csoil0=100,
+df_sconly <- scn_model( ctot0=100, csoil0=100,
                      ppfd=ppfd, lue=lue_manip, n_in=n_in, 
                      par=par_liebig, settings=settings, method="conly", accelerate=FALSE
                      )
 
-## "CO2" run (ambient N) with "minimum model"
+## "CO2" run (ambient N) with "Liebig model"
 par_liebig <- par
 par_liebig$alpha_fix <- 0.7
 df_scn_c_nmin_liebig <- scn_nmin_model( ctot0=100, csoil0=100, nmin0 = 100,
@@ -322,7 +322,7 @@ ggsave("fig/cplant_ag_co2_unavoid.pdf", width=5.5, height=3)
 #### C-only model
 
 ```{r}
-df_sc_liebig %>% 
+df_sconly %>% 
   select(simyear, cplant_ag_conly=cplant_ag) %>% 
   left_join( select( df_scn_c_nmin_liebig, simyear, cplant_ag_liebig=cplant_ag ), by="simyear" ) %>%
   tidyr::gather(varnam, value, c(cplant_ag_conly, cplant_ag_liebig)) %>% 
@@ -334,12 +334,12 @@ df_sc_liebig %>%
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted") +
-  scale_color_discrete(name="", breaks=c("cplant_ag_conly", "cplant_ag_liebig"), labels=c("C-only model", "Minimum model"))
+  scale_color_discrete(name="", breaks=c("cplant_ag_conly", "cplant_ag_liebig"), labels=c("C-only model", "Liebig model"))
 ggsave("fig/abgm_co2_liebig_conly.pdf", width=4, height=3)
 ```
 
 
-#### Minimum model
+#### Liebig model
 
 ```{r}
 df_scn_c_nmin %>% 
@@ -354,8 +354,19 @@ df_scn_c_nmin %>%
        subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
   expand_limits(y=0) +
   geom_vline(xintercept = 100, linetype="dotted") +
-  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_liebig"), labels=c("sCN model", "Minimum model"))
+  scale_color_discrete(name="", breaks=c("cplant_ag", "cplant_ag_liebig"), labels=c("sCN model", "Liebig model"))
 ggsave("fig/abgm_co2_liebig.pdf", width=4, height=3)
+
+df_scn_c_nmin_liebig %>%
+  ggplot( aes(x=simyear, y=overspill) ) +
+  geom_line(size=1) +
+  labs(
+    title="C overspill respiration", 
+    x="Simulation Year", 
+    y=expression(paste("C flux (g C m"^{-2}, " yr"^{-1}, ")")),
+    subtitle = expression(paste("Elevated CO"[2], " after year 100"))) +
+  geom_vline(xintercept = 100, linetype="dotted")
+ggsave("fig/overspill_c_liebig.pdf", width=4, height=3)
 ```
 
 #### Explicity mineral N pool
@@ -494,7 +505,7 @@ ggsave("fig/nopen_co2_nmin.pdf", width=4, height=3)
 - Maximise $(1-\alpha)$
 - Calibrate 
 - Find out (analytically) why root:shoot ratio returns to the same value as initially
-- Find out why the minimum model has such a strong fertilisation effect (maybe if it's calibrated to reasonable regions, the sensitivity declines?)
+- Find out why the Liebig model has such a strong fertilisation effect (maybe if it's calibrated to reasonable regions, the sensitivity declines?)
 
 
 <!-- ```{r} -->

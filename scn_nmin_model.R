@@ -1,5 +1,7 @@
 scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings, method="scn", accelerate=FALSE ){
 
+  require(dplyr)
+
   ## N acquisition function
   f_supply <- function( cbg, n0, f_unavoid, kr ){
     (1.0 - f_unavoid) * n0 * cbg / (cbg + kr )
@@ -54,6 +56,7 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
   out_clitterfall <- c()
   out_nlitterfall <- c()
   out_nmin        <- c()
+  out_overspill   <- c()
   
   ## plant, aboveground, start with root:shoot ratio of 0.5
   cplant_ag <- ctot0 * 0.5
@@ -225,6 +228,16 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
       clabl <- prod( aleaf, ppfd=my_ppfd, lue=my_lue, kl=par$kl ) #+clabl
       nlabl <- f_supply( cplant_bg, n0=nmin, kr=par$kr, f_unavoid = par$f_unavoid ) #+ nlabl
 
+      clabl_avl <- clabl
+
+      ## Take minimum of supply and demand
+      nreq <- par$eff * clabl * r_ntoc_plant
+      nlabl <- min(nlabl, nreq)
+      clabl <- nlabl * par$r_cton_plant
+
+      clabl_overspill <- clabl_avl - clabl
+
+      ## Reduce mineral N pool
       nmin <- nmin - nlabl
       
     } else {
@@ -249,6 +262,7 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
       out_clitterfall[itout] <- c_litterfall
       out_nlitterfall[itout] <- n_litterfall
       out_nmin[itout]        <- nmin
+      out_overspill[itout]   <- clabl_overspill
     }
     
   }
@@ -270,7 +284,8 @@ scn_nmin_model <- function( ctot0, csoil0, nmin0, ppfd, lue, n_in, par, settings
     npp          = out_npp,
     nmin         = out_nmin,
     c_litterfall = out_clitterfall,
-    n_litterfall = out_nlitterfall
+    n_litterfall = out_nlitterfall,
+    overspill    = out_overspill
   )
 
   return(df_out)
