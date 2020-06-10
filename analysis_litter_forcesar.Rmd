@@ -50,7 +50,7 @@ But before we start:
 
 **All that is saved as a new file `NewData_wide_CORRECTED2.csv`**
 
-Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
+Load the corrected file, which is based on the one Kevin sent on 1.3.2019. This is created XXXX.
 ```{r, warning=FALSE}
 df <- read_csv("~/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
   
@@ -65,324 +65,6 @@ df <- read_csv("~/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %
 # save experiments names
 df_experiments <- df %>% select(exp_nam, prev_name) %>% distinct()
 ```
-
-## 0. Issues
-
-### Sampling date
-
-This is not read in correctly. Either continue doing manual edits (open CSV in editor and check whether it's in a consistent format, at least within experiments), or do something clever if sampling date formats are at least consistent within experiments: e.g., reading the table experiment per experiment (making use of automatic interpretation of the sampling date format by read_csv()) and then stack all experiments' data together again.
-
-### Duplicate rows
-
-Some rows are simply duplicates. This is dangerous.
-```{r}
-keyvars <- c("exp_nam", "factors", "treatment", "Data_type", "Unit", "Sampling_date", "Start_Year", "Year", "n_plots")
-valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
-
-df %>% 
-  filter(exp_nam == "SwissFACE_trifolium2" & Data_type == "aboveground_biomass") %>% 
-  filter(treatment=="cf") %>% 
-  select(one_of(keyvars, valuevars)) %>% 
-  print()
-```
-
-This may be remediated automatically by using only columns that are distinct w.r.t. `valuevars` and `keyvars` (basically all columns in original data, except `ALIAS`).
-```{r}
-print(nrow(df))
-df <- df %>% 
-  distinct_at(vars(one_of(keyvars, valuevars))) %>%
-  mutate( id=1:n() )   # create new ID key (before this was 'ALIAS')
-print(nrow(df))
-
-df %>% 
-  filter(exp_nam == "SwissFACE_trifolium2" & Data_type == "aboveground_biomass") %>% 
-  filter(treatment=="cf") %>% 
-  select(one_of(keyvars, valuevars)) %>% 
-  print()
-```
-
-Still problems?
-```{r}
-df %>% 
-  filter(exp_nam == "SwissFACE_lolium2" & Data_type == "belowground_biomass") %>% 
-  filter(treatment=="cf", Year==6) %>% 
-  select(one_of(keyvars, valuevars)) %>% 
-  print()
-```
-Yes. In this case, the problem has to do with `Sampling_date`. I suspect that the problem with `Sampling_date` is that it was manually entered and consistency may be respected within experiments (and variables?), but not across variables. When read into R with `readr::read_csv()`, different formats are interpreted always with the same function. A possible solution to this is to read data separately for each experiment and variable and stack them together again (`bind_rows()`).
-
-**TODO:**
-
-- First, do some manual cleaning of `Sampling_date` as far as possible and reasonable. Then, develop a separate read-in by experiments and variables, stack data again, and write the combined data to file.
-
-### Distinct ambients
-
-The way the wide format is designed, the ambient values should be the same for different rows corresponding to different treatments (for a given experiment, variable, and sampling year). This is not always the case. It might be that these are actually different data from multiple samplings. However, this is not identifiable, but should be. An example:
-```{r}
-df %>% 
-  filter(exp_nam == "SwissFACE_lolium2" & Data_type == "Rh" ) %>% 
-  print()
-```
-
-**TODO:**
-
-- I haven't figured out how to do a bulk-check on this and resolve this. It doesn't affect too many entries. Hence, it might have to be cleaned by hand.
-
-
-## 4. Long versus wide
-
-
-### An example conversion
-
-How to perform a conversion of our current wide format to a long format? Let's do it for one example. An example for how the wide format is implemented in the current dataset:
-```{r}
-df_wide <- df %>% 
-  filter(exp_nam=="SwissFACE_lolium2", Data_type=="aboveground_biomass") %>%
-  select(exp_nam, factors, treatment, Data_type) %>% 
-  distinct() %>%
-  mutate( id=1:nrow(.),
-          ambient=rep("A", 3), elevated=c("B", "C", "D"),
-          ambient_Sd=rep("sdA", 3), elevated_Sd=c("sdB", "sdC", "sdD"),
-          ambient_Se=rep("seA", 3), elevated_Se=c("seB", "seC", "seD")) %>%
-  print()
-```
-
-To convert this to a long format, first get all available factors and create a vector. The available factors are:
-```{r}
-df %>% 
-  filter(!(factors %in% c("x","x99"))) %>% 
-  select(factors) %>% 
-  unique() %>% 
-  unlist() %>% 
-  unname() %>% 
-  print()
-```
-
-Create a vector with all single factors
-```{r}
-factors_avl <- df %>%
-  filter(!(factors %in% c("x","x99"))) %>%      # Something weird with this
-  select(factors) %>% 
-  unique() %>% 
-  mutate( factors_sep = strsplit(factors, NULL) ) %>% 
-  select(factors_sep) %>% 
-  unlist() %>% 
-  unname() %>% 
-  unique() %>% 
-  print()
-```
-
-Convert from wide to long, adding columns for all factors for which we have ambient and elevated levels' data.
-```{r warning=FALSE}
-source("R/wide_to_long_gcme.R")
-
-# run it
-keyvars <- c("id", "exp_nam", "factors", "level", "treatment", "Data_type")
-valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
-
-df_long_example <- df_wide %>%
-  select(one_of(keyvars, valuevars)) %>%
-  wide_to_long_gcme( keyvars ) %>%
-  print()
-```
-
-
-### Converting the entire table
-
-Let's apply this to the full data frame. First, keep only some of the columns:
-```{r warning=FALSE, eval=FALSE}
-keyvars <- c("id", "exp_nam", "factors", "treatment", "level", "Data_type", "Unit", "Start_Year", "Year",  "n_plots")
-valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd")
-
-df_long <- df %>% 
-  select(one_of(keyvars, valuevars)) %>%
-  wide_to_long_gcme(keyvars) %>% 
-  write_csv(path="~/data/gcme/data_received_190325/NewData_LONG.csv")
-```
-
-Thus, we have a long-format data table, that has *less* than twice as many rows as the original table, because the "absolute ambient" is no longer repeated:
-```{r eval=FALSE}
-print(nrow(df)*2)
-nrow(df_long)
-```
-
-
-#### Test
-
-Test, whether the conversion was doing alright.
-```{r}
-check_cf <- function(df_wide, df_long, verbose=FALSE){
-
-  ## check cf experiments
-  df_cf <- df_wide %>% filter(treatment %in% c("f","c","cf","fc"))
-
-  out <- tibble()
-
-  all_exp <- df_cf$exp_nam %>% unique
-
-  for (iexp in all_exp){
-
-    df_sub <- df_cf %>% filter(exp_nam==iexp)
-
-    all_var <- df_sub$Data_type %>% unique
-
-    for (ivar in all_var){
-
-      df_subsub <- df_sub %>% filter(Data_type==ivar)
-
-      all_var_unit <- df_subsub$Unit %>% unique
-
-      for (iunit in all_var_unit){
-
-        df_subsubsub <- df_subsub %>% filter(Unit==iunit)
-
-        # elevated-f treatment
-        correct_f <- df_subsubsub %>% 
-          filter(treatment=="f") %>% 
-          select(exp_nam, Data_type, Unit, Year, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
-          all_equal( ., df_long %>% filter(f & !c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, Unit, Year, mean, se, sd) )
-
-        # elevated-c treatment
-        correct_c <- df_subsubsub %>% 
-          filter(treatment=="c") %>% 
-          select(exp_nam, Data_type, Unit, Year, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
-          all_equal( ., df_long %>% filter(!f & c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, Unit, Year, mean, se, sd) )
-
-        # elevated-cf treatment
-        correct_cf <- df_subsubsub %>% 
-          filter(treatment=="cf") %>% 
-          select(exp_nam, Data_type, Unit, Year, mean=elevated, se=elevated_Se, sd=elevated_Sd) %>%
-          all_equal( ., df_long %>% filter(f & c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, Unit, Year, mean, se, sd) )
-
-        # (absolute) control: WARNING: DUPLICATED ROWS
-        correct_0 <- df_subsubsub %>% 
-          distinct(exp_nam, Data_type, Unit, Year, ambient, ambient_Se, ambient_Sd, .keep_all=TRUE) %>% 
-          select(exp_nam, Data_type, Unit, Year, mean=ambient, se=ambient_Se, sd=ambient_Sd) %>%
-          all_equal( ., df_long %>% filter(!f & !c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>% select(exp_nam, Data_type, Unit, Year, mean, se, sd) )
-        
-        if (verbose){
-        if (!identical(correct_0, TRUE)){
-          rlang::warn(correct_0)
-          print("WIDE:")
-          df_subsubsub %>%
-            distinct(exp_nam, Data_type, Unit, Year, ambient, ambient_Se, ambient_Sd, .keep_all=TRUE) %>%
-            select(exp_nam, Data_type, Unit, Year, mean=ambient, se=ambient_Se, sd=ambient_Sd) %>%
-            print()
-          print("LONG:")
-          df_long %>%
-            filter(!f & !c & exp_nam==iexp & Data_type==ivar & Unit==iunit) %>%
-            select(exp_nam, Data_type, Unit, Year, mean, se, sd) %>%
-            print()
-          print("---------")
-        }
-        }
-
-        out <- bind_rows(out, c(factors="cf", exp_nam=iexp, Data_type=ivar, Unit=iunit, correct_0=correct_0, correct_c=correct_c, correct_f=correct_f, correct_cf=correct_cf))
-
-      }
-    }
-  }
-
-  return(out)
-}
-out <- check_cf( df, df_long) %>% head()
-```
-
-**Issue:**
-
-- There are still lots of problems with identifying the ambients (see column `correct_0` in `out`). See for example:
-
-```{r eval=FALSE}
-## note row 18 is missing in wide
-out <- check_cf( filter(df, exp_nam=="BioCON", Data_type=="leaf_N", Year==4), df_long, verbose = TRUE)
-```
-
-**TODO:**
-
-- Make sure the wide-to-long conversion works fine. That is, `out` should have `TRUE` in all columns. 
-
-
-### Converting back with a twist
-
-In the original data, `ambient` was the "absolute ambient". For example in the `cf` treatment, `ambient` was no treatment at all (control), and `elevated` was `c` $\times$ `f`. We may re-design a wide version of the table and allow flexibility in what treatments are compared to each other, i.e., what `ambient` means. I would argue that this depends whether we are interested in a *single* effect or in interactions. In our case, we are interested primarily in the CO2 effect. Hence, in a factorial experiment `cf`, we may want to compare `c` to `0` (an "absolute ambient"), and `cf` to `f` and thus have more data available to evaluate the CO2-only effect.
-
-Let's implement this, by converting our example back to a CO2-wide format:
-```{r}
-long_to_wide_gcme <- function(df_long, keyvar){
-
-  joinvars <- names(df_long)[-which(names(df_long) %in% c("mean", "sd", "se", keyvar))]
-  factors_all <- df_long %>%
-    filter(!(factors %in% c("x","x99"))) %>%      # Something weird with this
-    select(factors) %>% 
-    unique() %>% 
-    mutate( factors_sep = strsplit(factors, NULL) ) %>% 
-    select(factors_sep) %>% 
-    unlist() %>% 
-    unname() %>% 
-    unique()
-  factorvars <- factors_all[-which(factors_all==keyvar)]
-    
-  # take all data where factor 'c' is TRUE
-  df_wide <- dplyr::filter(df_long, eval(parse(text=keyvar)) ) %>% 
-    
-    # call this 'elevated'
-    dplyr::rename(elevated=mean, elevated_sd=sd, elevated_se=se) %>% 
-    
-    # remove column 'c', is no longer used
-    dplyr::select(-keyvar) %>% 
-    
-    # merge this with the corresponding row where all other factors are the same, while 'c' is FALSE
-    left_join( 
-      
-      # take all data where factor 'c' is FALSE
-      dplyr::filter(df_long, !(eval(parse(text=keyvar)))) %>% 
-
-        # call this 'ambient'
-        dplyr::rename(ambient=mean, ambient_sd=sd, ambient_se=se) %>% 
-
-        # remove column 'c', is no longer used
-        dplyr::select(-keyvar),
-      
-      ## merge by all other columns
-      by = joinvars ) %>% 
-    
-    # order columns
-    select( c(joinvars, ambient, elevated, ambient_se, elevated_se, ambient_sd, elevated_sd)  )
-
-  return(df_wide)
-}
-```
-
-Run it
-```{r}
-df_long_example %>%
-  long_to_wide_gcme("c") %>%
-  print()
-```
-
-The same can be done w.r.t. the fertilisation treatment, with two rows corresponding now to whether or not CO2 was elevated.
-```{r}
-df_long_example %>%
-  long_to_wide_gcme("f") %>%
-  print()
-```
-
-Let's apply this to the full data frame.
-```{r eval=FALSE}
-keyvars <- c("ALIAS", "exp_nam", "factors", "Data_type", "Unit", "Sampling_date", "n_plots")
-valuevars <-  c("mean", "sd", "se")
-
-df_wide_c <- df_long %>% 
-  # select(one_of(keyvars, valuevars, factors_avl)) %>%
-  # select(-prev_name, -TT_Nut_Detail) %>% 
-  long_to_wide_gcme("c") %>% 
-  write_csv(path="~/data/gcme/data_received_190325/created/NewData_WIDE_c.csv")
-```
-
-**TODO:**
-
-- Develop a test to check the new-wide format against the long or against the original-wide table.
-
 
 <!-- ## 4. Number of replicates -->
 
@@ -429,7 +111,7 @@ df_c <- df %>%
   # select(-Fumigation_type, -Vegetation_type) %>% 
   
   ## Add prev_name back
-  left_join( df_experiments, by = "exp_nam") %>% 
+  left_join( df_experiments, by = c("exp_nam", "prev_name")) %>% 
   
   ## filter experiments with only manipulated CO2
   ## (no other factors manipulated, strong reduction of data)
@@ -451,9 +133,60 @@ df_c <- df %>%
   {.}
 ```
 
-## Litter production
+<!-- ## Litter -->
+
+<!-- `varnam %in% c("litter_prod", "litter_mass")` -->
+
+<!-- Collect information about experiments providing data for any of `varnam %in% c("litter_prod", "litter_mass")`. See procedure [here](https://docs.google.com/document/d/11ghws59q6Ts6j6GK6yNqQBvilrNojRN_aC7c41-LrI0/edit?usp=sharing). Add additional information from the experiments table (`table_var_exp_names_experiments.csv`) and from the data frame `df_experiments`, which is used to associate new and old experiments names. -->
+<!-- ```{r, warning=FALSE} -->
+<!-- df_litt <- read_csv("~/data/gcme/data_received_190325/table_var_exp_names_litter.csv") %>%  -->
+<!--   select(prev_name=expnam, varnam, Data_type, Source_Reference) %>% -->
+<!--   distinct() %>%  -->
+<!--   filter(varnam %in% c("litter_prod", "litter_mass") ) %>%  -->
+
+<!--   ## add 'exp_nam' (new experiment name) from data table -->
+<!--   left_join( df_experiments, by="prev_name" ) %>%  -->
+
+<!--   ## filter only experiments selected by general filters above -->
+<!--   filter( exp_nam %in% unique(df_c$exp_nam) ) %>%  -->
+
+<!--   ## add experiments meta information from experiments table -->
+<!--   left_join(  -->
+<!--     read_csv("~/data/gcme/data_received_190325/table_var_exp_names_experiments.csv") %>%  -->
+<!--       select(prev_name, Fumigation_type=my_fumigation_type, Cquantity_Control, Cquantity_Treatment, Vegetation_type, Plants_specs, Start_Year, End_Year, Remarks), -->
+<!--     by = c("prev_name") -->
+<!--     ) -->
+<!-- ``` -->
+
+<!-- Add `my_varnam` to the data table, defined by `my_varnam = ifelse( varnam %in% c("litter_prod", "litter_mass"), "my_litter", my_litter )`. WARNING: This assumes that variable names 'Data_type' are identical in old and new dataset (manually replaced white spaces with underscores in table_var_exp_names_anpp.csv, first) -->
+<!-- ```{r, warning=FALSE} -->
+<!-- keyvars <- c("exp_nam", "factors", "treatment", "Data_type", "Unit", "Sampling_date", "Start_Year", "Year", "n_plots") -->
+<!-- valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se", "elevated_Sd") -->
 
 
+<!-- df_c <- df_c %>%  -->
+<!--   mutate( varnam=NA ) %>%  -->
+
+<!--   ## add experiments information -->
+<!--   left_join( select( df_litt, -prev_name ), by=c("exp_nam", "Data_type") ) %>%  -->
+
+<!--   distinct_at(vars(one_of(keyvars, valuevars))) %>% -->
+
+<!--   rowwise() %>%  -->
+<!--   mutate( varnam = ifelse(!is.na(varnam.y), varnam.y, varnam ) ) %>%  -->
+<!--   select( -varnam.y ) %>%  -->
+<!--   mutate( my_varnam = NA ) %>%  -->
+<!--   mutate( my_varnam = ifelse( varnam %in% c("litter_prod", "litter_mass"), "my_litter", my_varnam ) ) -->
+<!-- ``` -->
+
+<!-- And some information about the data used for `my_litter` (only top 5 rows of a total of 110 available rows, full table at the bottom of this document) -->
+<!-- ```{r eval=FALSE} -->
+<!-- df_litt %>%  -->
+<!--   select(-prev_name, -Cquantity_Control) %>%  -->
+<!--   distinct(varnam, Data_type, exp_nam, .keep_all=TRUE) %>%  -->
+<!--   mutate( Source_Reference = str_replace_all(Source_Reference, "_", " ") ) %>%  -->
+<!--   knitr::kable() -->
+<!-- ``` -->
 
 
 ## ANPP
