@@ -1,5 +1,5 @@
 ---
-title: "CO2 experimental data analysis"
+title: "CO2 effects on litter production"
 author: "Beni Stocker"
 date: "`r Sys.Date()`"
 output:
@@ -17,6 +17,16 @@ header-includes:
 # bibliography: bibliography.bib
 ---
 
+```{r, warning=FALSE}
+library(readr)
+library(dplyr)
+library(metafor)   # see ?dat.curtis1998 for an example with CO2 manipulation data
+library(ggplot2)
+library(stringr)
+```
+
+
+*Data Screening is identical to code in `dataanalysis.Rmd`*
 
 # Data screening
 
@@ -42,8 +52,6 @@ But before we start:
 
 Load the corrected file, which is based on the one Kevin sent on 1.3.2019.
 ```{r, warning=FALSE}
-library(readr)
-library(dplyr)
 df <- read_csv("~/data/gcme/data_received_190325/NewData_wide_CORRECTED2.csv") %>%
   
   # something is wrong in columns ambient_Sd, ambient_Se, elevated...
@@ -118,156 +126,11 @@ df %>%
 
 **TODO:**
 
-- I haven't figured out how to do a bulk check on this and resolve it. It doesn't affect too many entries. Hence, it might have to be cleaned by hand.
-
-<!-- ## 1. Get data from eCO2 experiments -->
-
-<!-- Get information on what factors (`factors`) are available: -->
-<!-- ```{r, warning=FALSE} -->
-<!-- library(dplyr) -->
-<!-- unique(df$factors) %>% print() -->
-<!-- ``` -->
-
-<!-- Great! This looks nice and clean. There is one `"x99"`, coming from the "Niigata" experiment, which needs to be corrected. -->
-
-<!-- Filter only data from experiments where CO2 was manipulated. The way the data is organised here, a full factorial (eCO2 x N-fertilisation) experiment, which has four treatments (including the control), should have three rows in our dataset: eCO2-only, N-fertilisation-only, eCO2 $\times$ N-fertilisation). Such an experiment is identified as `factors %in% c("cf", "fc")`. SwissFACE_lolium2 is an example for such an experiment: -->
-
-<!-- ```{r, warning=FALSE} -->
-<!-- df %>% filter( exp_nam == "SwissFACE_lolium2" ) %>% select(exp_nam, factors, treatment) %>% unique() %>% print() -->
-<!-- ``` -->
-<!-- Confirmed. -->
-
-<!-- For our analysis, we're only interested in the treatments where CO2 was elevated. That is, `treatment` should contain a `"c"`. Filter only this data by: -->
-<!-- ```{r, warning=FALSE} -->
-<!-- df_co2 <- df %>% filter( grepl("c", treatment) ) -->
-<!-- ``` -->
-
-<!-- **Issue:** -->
-
-<!-- - Maybe it makes sense to exclude experiments where N was added. Does it? -->
-
-<!-- ```{r, warning=FALSE} -->
-<!-- df_co2 <- df_co2 %>% filter( !grepl("f", treatment) ) -->
-<!-- ``` -->
-
-
-<!-- We have a stunning ... -->
-<!-- ```{r, warning=FALSE} -->
-<!-- print( paste( "... number of data points:", nrow(df_co2) ) ) -->
-<!-- ``` -->
-
-
-<!-- ## 2. Data availability per experiment -->
-
-<!-- For each experiment, collect all available variables. -->
-<!-- ```{r, warning=FALSE} -->
-<!-- library(purrr) -->
-<!-- library(tidyr) -->
-<!-- #exp_varlist <- purrr::map( as.list(unique(df_co2$exp_nam)), ~filter(df_co2, exp_nam==.) %>% select(Data_type) %>% unlist() %>% unique() ) %>%  -->
-<!-- #  setNames( unique(df_co2$exp_nam) ) -->
-
-<!-- df_avl_byexp <- df_co2 %>%  -->
-<!--   mutate( n_plots = as.integer(n_plots) ) %>%  -->
-<!--   group_by( exp_nam ) %>%  -->
-<!--   nest() %>%  -->
-<!--   mutate( variables = purrr::map( data, ~unique( .$Data_type ) ), -->
-<!--           factors   = purrr::map( data, ~unique( .$factors ) ), -->
-<!--           treatment = purrr::map( data, ~unique( .$treatment ) ) -->
-<!--         ) %>%  -->
-<!--   mutate( n_variables = purrr::map_int( variables, ~length(.)), -->
-<!--           n_factors   = purrr::map_int( factors,   ~length(.)), -->
-<!--           n_treatment = purrr::map_int( treatment, ~length(.)), -->
-<!--           n_datap     = purrr::map_int( data, ~sum(.$n_plots))  -->
-<!--           ) -->
-
-<!-- # show top 100 rows -->
-<!-- df_avl_byexp %>%  -->
-<!--   select(exp_nam, factors, treatment, n_variables, n_datap ) %>%  -->
-<!--   arrange( desc(n_datap) ) %>% -->
-<!--   slice( 1:100 ) %>%  -->
-<!--   knitr::kable() #slice(1:50) %>% View() #  -->
-<!-- ``` -->
-
-<!-- **Issue:** -->
-
-<!-- - For some experiments, multiple different entries are available for `factors`. Shouldn't this always be a single entry for factor for a given experiment? -->
-
-<!-- ## 3. Get CO2 effect -->
-
-<!-- First, create a data frame that contains information for each experiment, whether Asat data is available. Not sure if we need that, actually... -->
-<!-- ```{r eval=FALSE} -->
-<!-- library(tidyr) -->
-<!-- exp_co2_asat <- purrr::map_dfc( exp_varlist, ~is.element("Asat", .) ) %>%  -->
-<!--   gather("exp_name", "avl_Asat") -->
-<!-- ``` -->
-
-<!-- Calculate (or extract) the CO2 effect (log-response) and its error for each variable of interest for which we have data, for each experiment separately. Let's start with one variable: `Asat` (and hope that's how it's called for all experiments). -->
-
-<!-- ```{r, warning=FALSE} -->
-<!-- df_co2_asat <- df_co2 %>% filter( Data_type=="Asat" )  -->
-<!-- ``` -->
-
-<!-- Once we have a list of variables, and the exact and consistent variable names in the dataset we can create a list of data frames as: -->
-<!-- ```{r, warning=FALSE} -->
-<!-- varlist <- c("Asat", "decomp", "leafN", "anpp" )  # just an example -->
-<!-- list_co2_byvar <- purrr::map( as.list(varlist), ~filter(df_co2, Data_type == .)) %>%  -->
-<!--   setNames(varlist) -->
-<!-- ``` -->
-
-
-<!-- ## 3. Data availability per variable -->
-
-<!-- Summarise data availability per variable (`Data_type`): -->
-
-<!-- - One column for number of "experiments". Here, different treatments within one experiments (`exp_nam`) are counted as separate "experiments". -->
-<!-- - One  -->
-
-<!-- ```{r, warning=FALSE} -->
-<!-- library(knitr) -->
-<!-- # second way -->
-<!-- df_avl_byvar <- df_co2 %>%  -->
-<!--   mutate( n_plots = as.integer(n_plots) ) %>%  -->
-<!--   group_by( Data_type ) %>%  -->
-<!--   nest() %>%  -->
-<!--   mutate( experiments = purrr::map( data, ~unique( .$exp_nam ) ) ) %>%  -->
-<!--   mutate( n_experiments = purrr::map_int( experiments, ~length(.)), -->
-<!--           n_datap       = purrr::map_int( data, ~sum(.$n_plots)), -->
-<!--           n_exp_treat   = purrr::map_int( data, ~n_distinct(.$exp_nam, .$treatment)) -->
-<!--           ) -->
-
-<!-- # show top 100 rows by n_datap -->
-<!-- df_avl_byvar %>%  -->
-<!--   arrange(desc(n_datap)) %>%  -->
-<!--   select(Data_type, n_experiments, n_exp_treat, n_datap) %>%  -->
-<!--   slice(1:50) %>%  -->
-<!--   knitr::kable() #%>% View() # -->
-
-<!-- ``` -->
-
-<!-- **Issue** -->
-
-<!-- - Some variable names are odd, maybe incorrectly read into R: -->
-<!-- ```{r, warning=FALSE} -->
-<!-- df_avl_byvar %>% select(Data_type) %>% slice(1:9) %>% print() -->
-<!-- ``` -->
+- I haven't figured out how to do a bulk-check on this and resolve this. It doesn't affect too many entries. Hence, it might have to be cleaned by hand.
 
 
 ## 4. Long versus wide
 
-<!-- ### The issue -->
-
-<!-- Let's look at data from just one experiment (`"SwissFACE_trifolium2"`): -->
-<!-- ```{r, warning=FALSE} -->
-<!-- df_co2 %>% filter(exp_nam == "SwissFACE_lolium2") %>% print() -->
-<!-- ``` -->
-
-<!-- This data frame now has multiple rows, corresponding to different sampling dates. Some points here: -->
-
-<!-- - The row Sampling_date is not very clean and cannot coerced into a date object (preferrable to be done with the R package lubridate). This is (almost) ok for now (we're just treating this as replicates, disregarding the information of the date), but needs to be addressed when using the data for model-data fusion (need to "sample" the model output at the same date). However ... -->
-<!-- - ... if we are to use 'experiment year since the start' as a factor in our analysis, this needs to be addressed. Either, we try to get the actual sampling date as a lubridate-ymd object (looks like "YY-MM-DD"), and have separate experiment meta information where the start year of the experiment is specified. Or, we just have a row in this data frame here, that specifies the experiment year (year=1 is the first year under treatment, year=0 is the last year of the pre-treatment period, or similar). -->
-<!-- - Units are $\mu$ mol? The respective character is not interpreted correctly. This is ok for now, as we are only looking only at response ratios. -->
-<!-- - In this example (site `"SwissFACE_trifolium2"`), I am confused about the information given in column `factors` (is `"cf"` for all rows displayed above). I interpret this as saying that this particular experiment was a 2-factorial experiment with a CO2 and fertilization treatment. However, the rows displayed here are only for the CO2-only treatment. Where are the remaining rows? -->
-<!-- - **Fundamental question:** In a multi-factorial experiment (let's stick with the example of `"SwissFACE_trifolium2"`), where one factor is CO2, and when trying to quantify the *CO2 effect*, we should use data both from the CO2-only and from the CO2xFertilization treatment and quantify *two* response ratios as c/control and cf/f. Do you agree? The way the data is structured now, it's not straight-forward to get these two response ratios as rows for the *cf* treatment use elevated as *cf*, and ambient as control, not *f*. Hence, the data first needs to be reshaped a bit... Probably best by converting it first to a long format. But let's solve the other points first. -->
 
 ### An example conversion
 
@@ -311,77 +174,7 @@ factors_avl <- df %>%
 
 Convert from wide to long, adding columns for all factors for which we have ambient and elevated levels' data.
 ```{r warning=FALSE}
-wide_to_long_gcme <- function( df_wide, keyvars ){
-  
-  require(stringr)
-  
-  ## if level is 'elevated', turn all factor levels that are part of 'treatment' to TRUE
-  switch_factor <- function(df){
-    if (df$level=="elevated"){
-      for (ifactor in strsplit(df$treatment, NULL) %>% unlist()){
-        df[[ifactor]] <- TRUE
-      }
-    }
-    return(df)
-  }
-  
-  ## First get available factors
-  factors_avl <- df_wide %>%
-    filter(!(factors %in% c("x","x99"))) %>%      # Something weird with this
-    select(factors) %>% 
-    unique() %>% 
-    mutate( factors_sep = strsplit(factors, NULL) ) %>% 
-    select(factors_sep) %>% 
-    unlist() %>% 
-    unname() %>% 
-    unique()  
-  
-  df_long <- df_wide %>%
-    
-    ## gather 'mean' based on columns: 'ambient', 'elevated'
-    select( -ambient_Sd, -elevated_Sd, -ambient_Se, -elevated_Se ) %>%
-    tidyr::gather(level, mean, c(ambient, elevated)) %>%
-    
-    ## gather 'sd' based on columns: 'ambient_Sd', 'elevated_Sd'
-    left_join( 
-      select( df_wide, -ambient, -elevated, -ambient_Se, -elevated_Se ) %>%
-        tidyr::gather(level, sd, c(ambient_Sd, elevated_Sd)) %>%
-        mutate( level = stringr::str_split(.$level, "_") %>% purrr::map(., 1) %>% unlist() ),
-      by = c(keyvars) ) %>% 
-    
-    ## gather 'se' based on columns: 'ambient_Se', 'elevated_Se'
-    left_join( 
-      select( df_wide, -ambient, -elevated, -ambient_Sd, -elevated_Sd ) %>%
-        tidyr::gather(level, se, c(ambient_Se, elevated_Se)) %>%
-        mutate( level = stringr::str_split(.$level, "_") %>% purrr::map(., 1) %>% unlist() ),
-      by = c(keyvars) ) %>% 
-    
-    ## magically add columns corresponding to all available levels of 'factors'
-    `is.na<-`(factors_avl) %>% 
-    
-    ## fill all new factor columns with FALSE
-    dplyr::mutate_at( factors_avl, ~FALSE ) 
-  
-  ## Determine new factor columns based on information in 'treatment' and 'level'
-  df_long <- purrr::map_dfr(as.list(1:nrow(df_long)), ~switch_factor(df_long[.,]))
-  
-  ## Now we have duplicate ambients, treat them separately and stack ambient and elevated together again
-  df_long <- df_long %>% filter(level=="ambient") %>% 
-    
-    # WARNING: This assumes that if values are identical, they are repetitions, ignoring differences w.r.t Sampling_Date
-    distinct( exp_nam, factors, Data_type, Unit, Year, mean, sd, se, .keep_all=TRUE ) %>%
-    
-    # bind them together again. also cleaning replicated rows (note treatment added as column!)
-    bind_rows( ., 
-               filter(df_long, level=="elevated") %>% 
-                 distinct( exp_nam, factors, treatment, Data_type, Unit, Year, mean, sd, se, .keep_all=TRUE )
-                 ) %>% 
-    
-    ## abandon columns, now obsolete with boolean columns for factors 
-    select(-treatment, -level, -id)
-  
-  return(df_long)
-}
+source("R/wide_to_long_gcme.R")
 
 # run it
 keyvars <- c("id", "exp_nam", "factors", "level", "treatment", "Data_type")
@@ -403,7 +196,6 @@ valuevars <-  c("ambient", "ambient_Se", "ambient_Sd", "elevated", "elevated_Se"
 
 df_long <- df %>% 
   select(one_of(keyvars, valuevars)) %>%
-  # filter(exp_nam=="BioCON" & Data_type=="leaf_N" & Year==4) %>%  # xxx debug
   wide_to_long_gcme(keyvars) %>% 
   write_csv(path="~/data/gcme/data_received_190325/NewData_LONG.csv")
 ```
@@ -493,7 +285,7 @@ check_cf <- function(df_wide, df_long, verbose=FALSE){
 
   return(out)
 }
-#out <- check_cf( df, df_long) %>% head()
+out <- check_cf( df, df_long) %>% head()
 ```
 
 **Issue:**
@@ -610,12 +402,6 @@ df_wide_c <- df_long %>%
 
 # Data selection
 
-The initial draft of the figures we want to draw looks like this:
-
-![](./fig/cn_feedback_cascade_draft.jpg)
-
-The following is a list of variables we need according to this draft, and the corresponding (possibly) relevant variables (`Data_type`) in our dataset.
-
 Add two columns to the data. One for the new standard variable name (`varnam`), taken from CSV files. And one for this specific study where multiple variables (based on `varnames`) are pooled because they contain relevant and comparable information when evaluating response ratios (named `my_varnam`).
 
 ## General filters
@@ -664,6 +450,11 @@ df_c <- df %>%
   
   {.}
 ```
+
+## Litter production
+
+
+
 
 ## ANPP
 
@@ -993,7 +784,6 @@ $$
 
 Now, do the meta-analysis and plot results.
 ```{r, warning=FALSE}
-library(metafor)   # see ?dat.curtis1998 for an example with CO2 manipulation data
 ## aggregate by variable and experiment, pooling multiple years, sampling dates, and plots/replicates and calculate log response ratio
 df_c_sub <- df_c %>%         
   
@@ -1075,7 +865,6 @@ names(list_meta) <- varlist
 ```
 Plot dots and my box
 ```{r}
-library(ggplot2)
 df_c_agg %>%
   # arrange(logr) %>% 
   mutate( my_lab = factor(my_lab, levels=rev(c("Asat", "Leaf Nmass", "Leaf Narea", "ANPP", "N uptake", "N availability", "root:shoot ratio", "BNPP", "Soil decomposition rate")))) %>% 
